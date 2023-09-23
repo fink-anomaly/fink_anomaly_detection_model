@@ -1,7 +1,10 @@
-import pandas as pd
-from tqdm import tqdm
+import pickle
+import sys
+import os.path
 from collections import defaultdict
 from functools import lru_cache, partial
+import pandas as pd
+from tqdm import tqdm
 from random import randint, choice
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.ensemble import IsolationForest
@@ -9,25 +12,21 @@ from sklearn.metrics import make_scorer
 from sklearn.model_selection import GridSearchCV
 from sklearn.utils.estimator_checks import check_estimator, check_regressors_train
 from sklearn.metrics import roc_auc_score
-import pickle
-import sys
 from skl2onnx import to_onnx
-import os.path
 from skl2onnx.common.data_types import FloatTensorType
-from skl2onnx import to_onnx
 
 def extract_one(data, key):
     series = pd.Series(data[key], dtype=float)
     return series
 
-def train_with_forest(data: pd.DataFrame, train_params, scorer, y_true) -> IsolationForest:
+def train_with_forest(data: pd.DataFrame, train_params, scorer_, y_true) -> IsolationForest:
     forest = IsolationForest()
-    clf = GridSearchCV(forest, train_params, scoring=scorer, verbose=2, cv=4)
+    clf = GridSearchCV(forest, train_params, scoring=scorer_, verbose=2, cv=4)
     clf.fit(data.values, y_true)
     return clf.best_estimator_
 
-def scorer(estimator, X_test, y_test):
-    y_score = estimator.decision_function(X_test)
+def scorer(estimator, x_test, y_test):
+    y_score = estimator.decision_function(x_test)
     return roc_auc_score(y_test, y_score)
 
 def unknown_pref_metric(y_true, y_pred):
@@ -43,7 +42,6 @@ def get_stat_param_func(data):
     @lru_cache
     def get_stat_param(feature, param):
         return getattr(data[feature], param)()
-    
     return get_stat_param
 
 
@@ -67,8 +65,8 @@ def append_rows(data, rows):
     return data.append(rows, ignore_index=True)
 
 
-def unknown_and_custom_loss(model, x, true_is_anomaly):
-    scores = model.score_samples(x)
+def unknown_and_custom_loss(model, x_data, true_is_anomaly):
+    scores = model.score_samples(x_data)
     scores_order = scores.argsort()
     len_for_check = 3000
     found = 0
@@ -81,25 +79,26 @@ def unknown_and_custom_loss(model, x, true_is_anomaly):
 
 def fink_ad_model_train():
     print(sys.argv)
+    assert len(sys.argv) == 3, 'Not all the arguments have been conveyed!'
     _, train_data_path, n_jobs = sys.argv
     n_jobs = int(n_jobs)
     assert os.path.isfile(train_data_path), 'The specified training dataset file does not exist!'
-    
+
     print('Loading training data...')
     x = pd.read_parquet(train_data_path)
     print(f'data shape: {x.shape}')
     features_1 = x["lc_features"].apply(lambda data: extract_one(data, "1")).add_suffix("_r")
     features_2 = x["lc_features"].apply(lambda data: extract_one(data, "2")).add_suffix("_g")
-    
+
     print('Filtering...')
     data = pd.concat([
     x.drop(['lc_features', 'cjd', 'cfid', 'cmag', 'cerrmag', 'is_null'], axis=1),
     features_1,
     features_2,
     ], axis=1).dropna(axis=0)
-    
+
     datasets = defaultdict(lambda: defaultdict(list))
-    
+
     with tqdm(total=len(data)) as pbar:
         for index, row in data.iterrows():
             for passband in ('_r', '_g'):
@@ -122,12 +121,11 @@ def fink_ad_model_train():
                 continue
             new_df[col] = new_df[col].astype('float64')
         main_data[passband] = new_df
-    
-    
+
     data_r = main_data['_r']
     data_g = main_data['_g']
     assert data_g.shape[1] == data_r.shape[1], '''Mismatch of the dimensions of r/g!'''
-    
+
     classes_r = data_r['class']
     classes_g = data_g['class']
     data_r = data_r.drop(labels=['object_id', 'class'], axis=1)
@@ -191,11 +189,11 @@ def fink_ad_model_train():
         'score_samples': True
     }}
     onx = to_onnx(forest_simp_g, initial_types=initial_type_g, options=options)
-    with open("forest_g.onnx", "wb") as f:
-        f.write(onx.SerializeToString())
+    with open("forest_g.onnx", "wb") as file:
+        file.write(onx.SerializeToString())
     options = {id(forest_simp_r): {
         'score_samples': True
     }}
     onx = to_onnx(forest_simp_r, initial_types=initial_type_r, options=options)
-    with open("forest_simp_r.onnx", "wb") as f:
-        f.write(onx.SerializeToString())
+    with open("forest_r.onnx", "wb") as file:
+        file.write(onx.SerializeToString())
