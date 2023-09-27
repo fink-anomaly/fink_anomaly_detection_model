@@ -83,7 +83,7 @@ def fink_ad_model_train():
     _, train_data_path, n_jobs = sys.argv
     n_jobs = int(n_jobs)
     assert os.path.isfile(train_data_path), 'The specified training dataset file does not exist!'
-
+    filter_base = ('_r', '_g')
     print('Loading training data...')
     x = pd.read_parquet(train_data_path)
     print(f'data shape: {x.shape}')
@@ -101,7 +101,7 @@ def fink_ad_model_train():
 
     with tqdm(total=len(data)) as pbar:
         for index, row in data.iterrows():
-            for passband in ('_r', '_g'):
+            for passband in filter_base:
                 new_data = datasets[passband]
                 new_data['object_id'].append(row.objectId)
                 new_data['class'].append(row['class'])
@@ -121,15 +121,9 @@ def fink_ad_model_train():
                 continue
             new_df[col] = new_df[col].astype('float64')
         main_data[passband] = new_df
-
-    data_r = main_data['_r']
-    data_g = main_data['_g']
-    assert data_g.shape[1] == data_r.shape[1], '''Mismatch of the dimensions of r/g!'''
-
-    classes_r = data_r['class']
-    classes_g = data_g['class']
-    data_r = data_r.drop(labels=['object_id', 'class'], axis=1)
-    data_g = data_g.drop(labels=['object_id', 'class'], axis=1)
+    data = {key : main_data[key] in filter_base}
+    assert data['_r'].shape[1] == data['_g'].shape[1], '''Mismatch of the dimensions of r/g!'''
+    classes = {filter_ : data[filter_]['class'] for filter_ in filter_base}
     common_rems = [
         'percent_amplitude',
         'linear_fit_reduced_chi2',
@@ -140,60 +134,33 @@ def fink_ad_model_train():
         'weighted_mean',
         'mean'
     ]
-    data_r = data_r.drop(common_rems, axis=1)
-    data_g = data_g.drop(common_rems, axis=1)
-    data_r.mean().to_csv('r_means.csv')
-    data_g.mean().to_csv('g_means.csv')
-    is_unknown_r = classes_r == 'Unknown'
-    is_unknown_g = classes_g == 'Unknown'
-
-    search_params_unknown_r = {
-        'n_estimators': (100, 150, 200, 300, 500),
-        'max_features':(0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-        'contamination': (sum(is_unknown_r) / len(data_r),),
-        'bootstrap': (True,),
-        'max_samples': (0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-        'n_jobs': (n_jobs,)
-    }
-
-    search_params_unknown_g = {
-        'n_estimators': (100, 150, 200, 300, 500),
-        'max_features':(0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-        'contamination': (sum(is_unknown_g) / len(data_g),),
-        'bootstrap': (True,),
-        'max_samples': (0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-        'n_jobs': (n_jobs,)
-    }
+    data = {key : item.drop(labels=['object_id', 'class'] + common_rems, axis=1) for key, item in data.items()}
+    for key, item in data.items():
+        item.mean().to_csv(f'{key}_means.csv')
     print('Training...')
-    forest_simp_r = train_with_forest(
-        data_r,
-        search_params_unknown_r,
+    for key in filter_base:
+        is_unknown = classes[key] == 'Unknown'
+        search_params_unknown = {
+        'n_estimators': (100, 150, 200, 300, 500),
+        'max_features':(0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+        'contamination': (sum(is_unknown) / len(data[key]),),
+        'bootstrap': (True,),
+        'max_samples': (0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+        'n_jobs': (n_jobs,)
+        }
+        forest_simp = train_with_forest(
+        data[key],
+        search_params_unknown,
         scorer,
-        is_unknown_r
-    )
-    forest_simp_g = train_with_forest(
-        data_g,
-        search_params_unknown_g,
-        scorer,
-        is_unknown_g
-    )
-    with open('forest_g.pickle', 'wb') as handle:
-        pickle.dump(forest_simp_g, handle)
-    with open('forest_r.pickle', 'wb') as handle:
-        pickle.dump(forest_simp_r, handle)
-    forest_simp_g._max_features = 18
-    forest_simp_r._max_features = 18
-    initial_type_g = [('X', FloatTensorType([None, data_g.shape[1]]))]
-    initial_type_r = [('X', FloatTensorType([None, data_r.shape[1]]))]
-    options = {id(forest_simp_g): {
-        'score_samples': True
-    }}
-    onx = to_onnx(forest_simp_g, initial_types=initial_type_g, options=options)
-    with open("forest_g.onnx", "wb") as file:
-        file.write(onx.SerializeToString())
-    options = {id(forest_simp_r): {
-        'score_samples': True
-    }}
-    onx = to_onnx(forest_simp_r, initial_types=initial_type_r, options=options)
-    with open("forest_r.onnx", "wb") as file:
-        file.write(onx.SerializeToString())
+        is_unknown
+        )
+        with open(f'forest{key}.pickle', 'wb') as handle:
+            pickle.dump(forest_simp, handle)
+        forest_simp._max_features = 18
+        initial_type = [('X', FloatTensorType([None, data[key].shape[1]]))]
+        options = {id(forest_simp): {
+            'score_samples': True
+        }}
+        onx = to_onnx(forest_simp, initial_types=initial_type, options=options)
+        with open(f"forest{key}.onnx", "wb") as file:
+            file.write(onx.SerializeToString())

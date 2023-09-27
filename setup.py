@@ -7,7 +7,7 @@ def readme():
 
 
 setup(name='fink_anomaly_detection_model',
-      version='0.3.3',
+      version='0.3.6',
       description='Fink anomaly detection model',
       packages=find_packages(),
       author_email='timofei.psheno@gmail.com',
@@ -18,6 +18,6 @@ setup(name='fink_anomaly_detection_model',
         'console_scripts': [
             'fink_ad_model_train = fink_anomaly_detection_model:fink_ad_model_train',
         ],
-       python_requires='>=3.8'
-    }
+    },
+    python_requires='>=3.8'
 )
