@@ -1,6 +1,7 @@
 import pickle
 import sys
 import os.path
+import argparse
 from collections import defaultdict
 from functools import lru_cache, partial
 import pandas as pd
@@ -78,10 +79,12 @@ def unknown_and_custom_loss(model, x_data, true_is_anomaly):
     return (found / len_for_check) * 100
 
 def fink_ad_model_train():
-    print(sys.argv)
-    assert len(sys.argv) == 3, 'Not all the arguments have been conveyed!'
-    _, train_data_path, n_jobs = sys.argv
-    n_jobs = int(n_jobs)
+    parser = argparse.ArgumentParser(description='Fink AD model training')
+    parser.add_argument('dataset_dir', type=str, help='Input dir for dataset')
+    parser.add_argument('--n_jobs', type=int, default=-1, help='Number of threads (default: -1)')
+    args = parser.parse_args()
+    train_data_path = args.dataset_dir
+    n_jobs = args.n_jobs
     assert os.path.isfile(train_data_path), 'The specified training dataset file does not exist!'
     filter_base = ('_r', '_g')
     print('Loading training data...')
@@ -121,7 +124,7 @@ def fink_ad_model_train():
                 continue
             new_df[col] = new_df[col].astype('float64')
         main_data[passband] = new_df
-    data = {key : main_data[key] in filter_base}
+    data = {key : main_data[key] for key in filter_base}
     assert data['_r'].shape[1] == data['_g'].shape[1], '''Mismatch of the dimensions of r/g!'''
     classes = {filter_ : data[filter_]['class'] for filter_ in filter_base}
     common_rems = [
