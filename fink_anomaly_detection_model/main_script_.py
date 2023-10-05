@@ -14,6 +14,7 @@ from skl2onnx import to_onnx
 from skl2onnx.common.data_types import FloatTensorType
 from coniferest.onnx import to_onnx as to_onnx_add
 from coniferest.aadforest import AADForest
+from sklearn.model_selection import train_test_split
 import itertools
 
 
