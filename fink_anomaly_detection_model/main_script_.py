@@ -186,7 +186,7 @@ def fink_ad_model_train():
     parser.add_argument('dataset_dir', type=str, help='Input dir for dataset')
     parser.add_argument('--n_jobs', type=int, default=-1, help='Number of threads (default: -1)')
     parser.add_argument('--AAD', action='store_false')
-    args = parser.parse_args(['dataset_dir', '--n_jobs', '--AAD'])
+    args = parser.parse_args()
     train_data_path = args.dataset_dir
     n_jobs = args.n_jobs
     assert os.path.isfile(train_data_path), 'The specified training dataset file does not exist!'
