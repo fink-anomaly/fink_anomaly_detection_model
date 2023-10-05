@@ -277,8 +277,8 @@ def fink_ad_model_train():
         with open(f"forest{key}.onnx", "wb") as file:
             file.write(onx.SerializeToString())
         search_params_aad = {
-            "n_trees": list(range(800, 1500, 100)),
-            "n_subsamples": list(range(100, 900, 100)),
+            "n_trees": (100, 150, 200, 300, 500),
+            "n_subsamples": (obj*data[key].shape[0] for obj in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)),
             "tau": (1 - sum(is_unknown) / len(data[key]),),
             "n_jobs": (n_jobs,)
         }
