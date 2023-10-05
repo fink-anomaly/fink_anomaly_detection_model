@@ -12,7 +12,29 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import roc_auc_score
 from skl2onnx import to_onnx
 from skl2onnx.common.data_types import FloatTensorType
+from coniferest.onnx import to_onnx as to_onnx_ADD
+import itertools
 
+
+def generate_param_comb(param_dict):
+    base = itertools.product(*param_dict.values())
+    columns = param_dict.keys()
+    for obj in base:
+        yield dict(zip(columns, obj))
+
+
+def train_base_AAD(data: pd.DataFrame, train_params, scorer, y_true):
+    X_train, X_test, y_train, y_test = train_test_split(
+        data.values, y_true, test_size=0.2, random_state=42)
+    best_est = (0, None)
+    for cur_params in generate_param_comb(train_params):
+
+        forest = AADForest(**cur_params)
+        forest.fit(X_train, y_train)
+        cur_score = scorer(forest, X_test, y_test)
+        if cur_score > best_est[0]:
+            best_est = (cur_score, forest)
+    return best_est[1]
 
 def extract_one(data, key) -> pd.Series:
     """
@@ -47,6 +69,9 @@ def train_with_forest(data, train_params, scorer_, y_true) -> IsolationForest:
     clf.fit(data.values, y_true)
     return clf.best_estimator_
 
+def scorer_AAD(estimator, X_test, y_test):
+    y_score = estimator.score_samples(X_test)
+    return roc_auc_score(y_test, y_score)
 
 def scorer(estimator, x_test, y_test):
     """
@@ -160,7 +185,8 @@ def fink_ad_model_train():
     parser = argparse.ArgumentParser(description='Fink AD model training')
     parser.add_argument('dataset_dir', type=str, help='Input dir for dataset')
     parser.add_argument('--n_jobs', type=int, default=-1, help='Number of threads (default: -1)')
-    args = parser.parse_args()
+    parser.add_argument('--AAD', action='store_false')
+    args = parser.parse_args(['--AAD'])
     train_data_path = args.dataset_dir
     n_jobs = args.n_jobs
     assert os.path.isfile(train_data_path), 'The specified training dataset file does not exist!'
@@ -248,3 +274,22 @@ def fink_ad_model_train():
         onx = to_onnx(forest_simp, initial_types=initial_type, options=options)
         with open(f"forest{key}.onnx", "wb") as file:
             file.write(onx.SerializeToString())
+        if args.AAD:
+            search_params_aad = {
+                "n_trees": list(range(800, 1500, 100)),
+                "n_subsamples": list(range(100, 900, 100)),
+                "tau": (1 - sum(is_unknown) / len(data[key]),),
+                "n_jobs": (n_jobs,)
+            }
+            forest_simp = train_base_AAD(
+                data[key],
+                search_params_aad,
+                scorer_AAD,
+                is_unknown
+            )
+            onx = to_onnx_ADD(forest_simp, initial_types=initial_type)
+            with open(f"forest{key}_AAD.onnx", "wb") as f:
+                f.write(onx.SerializeToString())
+
+if __name__ == "__main__":
+    print("INIT")
