@@ -34,8 +34,10 @@ def train_base_AAD(data: pd.DataFrame, train_params, scorer, y_true):
         forest = AADForest(**cur_params)
         forest.fit(X_train, y_train)
         cur_score = scorer(forest, X_test, y_test)
+        print(cur_score)
         if cur_score > best_est[0]:
             best_est = (cur_score, forest, cur_params)
+    print(f'Optimal: {best_est[2]}')
     return AADForest(**best_est[2]).fit(data.values, y_true)
 
 
