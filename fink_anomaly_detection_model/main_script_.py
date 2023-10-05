@@ -12,7 +12,8 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import roc_auc_score
 from skl2onnx import to_onnx
 from skl2onnx.common.data_types import FloatTensorType
-from coniferest.onnx import to_onnx as to_onnx_ADD
+from coniferest.onnx import to_onnx as to_onnx_add
+from coniferest.aadforest import AADForest
 import itertools
 
 
@@ -34,7 +35,7 @@ def train_base_AAD(data: pd.DataFrame, train_params, scorer, y_true):
         cur_score = scorer(forest, X_test, y_test)
         if cur_score > best_est[0]:
             best_est = (cur_score, forest)
-    return best_est[1]
+    return AADForest(**best_est[0]).fit(data, y_true)
 
 def extract_one(data, key) -> pd.Series:
     """
@@ -285,9 +286,6 @@ def fink_ad_model_train():
             scorer_AAD,
             is_unknown
         )
-        onx = to_onnx_ADD(forest_simp, initial_types=initial_type)
+        onx = to_onnx_add(forest_simp, initial_types=initial_type)
         with open(f"forest{key}_AAD.onnx", "wb") as f:
             f.write(onx.SerializeToString())
-
-if __name__ == "__main__":
-    print("INIT")

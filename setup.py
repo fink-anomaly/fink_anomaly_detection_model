@@ -7,7 +7,7 @@ def readme():
 
 
 setup(name='fink_anomaly_detection_model',
-      version='0.3.15',
+      version='0.3.16',
       description='Fink anomaly detection model',
       packages=find_packages(),
       author_email='timofei.psheno@gmail.com',
