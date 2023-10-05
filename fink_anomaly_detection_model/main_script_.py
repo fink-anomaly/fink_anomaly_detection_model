@@ -28,15 +28,16 @@ def generate_param_comb(param_dict):
 def train_base_AAD(data: pd.DataFrame, train_params, scorer, y_true):
     X_train, X_test, y_train, y_test = train_test_split(
         data.values, y_true, test_size=0.2, random_state=42)
-    best_est = (0, None)
+    best_est = (0, None, None)
     for cur_params in generate_param_comb(train_params):
-
+        print(cur_params)
         forest = AADForest(**cur_params)
         forest.fit(X_train, y_train)
         cur_score = scorer(forest, X_test, y_test)
         if cur_score > best_est[0]:
-            best_est = (cur_score, forest)
-    return AADForest(**best_est[0]).fit(data, y_true)
+            best_est = (cur_score, forest, cur_params)
+    return AADForest(**best_est[2]).fit(data, y_true)
+
 
 def extract_one(data, key) -> pd.Series:
     """
