@@ -185,7 +185,6 @@ def fink_ad_model_train():
     parser = argparse.ArgumentParser(description='Fink AD model training')
     parser.add_argument('dataset_dir', type=str, help='Input dir for dataset')
     parser.add_argument('--n_jobs', type=int, default=-1, help='Number of threads (default: -1)')
-    parser.add_argument('--AAD', action='store_false')
     args = parser.parse_args()
     train_data_path = args.dataset_dir
     n_jobs = args.n_jobs
@@ -274,22 +273,21 @@ def fink_ad_model_train():
         onx = to_onnx(forest_simp, initial_types=initial_type, options=options)
         with open(f"forest{key}.onnx", "wb") as file:
             file.write(onx.SerializeToString())
-        if args.AAD:
-            search_params_aad = {
-                "n_trees": list(range(800, 1500, 100)),
-                "n_subsamples": list(range(100, 900, 100)),
-                "tau": (1 - sum(is_unknown) / len(data[key]),),
-                "n_jobs": (n_jobs,)
-            }
-            forest_simp = train_base_AAD(
-                data[key],
-                search_params_aad,
-                scorer_AAD,
-                is_unknown
-            )
-            onx = to_onnx_ADD(forest_simp, initial_types=initial_type)
-            with open(f"forest{key}_AAD.onnx", "wb") as f:
-                f.write(onx.SerializeToString())
+        search_params_aad = {
+            "n_trees": list(range(800, 1500, 100)),
+            "n_subsamples": list(range(100, 900, 100)),
+            "tau": (1 - sum(is_unknown) / len(data[key]),),
+            "n_jobs": (n_jobs,)
+        }
+        forest_simp = train_base_AAD(
+            data[key],
+            search_params_aad,
+            scorer_AAD,
+            is_unknown
+        )
+        onx = to_onnx_ADD(forest_simp, initial_types=initial_type)
+        with open(f"forest{key}_AAD.onnx", "wb") as f:
+            f.write(onx.SerializeToString())
 
 if __name__ == "__main__":
     print("INIT")
