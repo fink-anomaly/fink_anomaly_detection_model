@@ -36,7 +36,7 @@ def train_base_AAD(data: pd.DataFrame, train_params, scorer, y_true):
         cur_score = scorer(forest, X_test, y_test)
         if cur_score > best_est[0]:
             best_est = (cur_score, forest, cur_params)
-    return AADForest(**best_est[2]).fit(data, y_true)
+    return AADForest(**best_est[2]).fit(data.values, y_true)
 
 
 def extract_one(data, key) -> pd.Series:
