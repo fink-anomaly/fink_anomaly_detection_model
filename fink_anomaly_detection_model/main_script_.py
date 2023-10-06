@@ -90,7 +90,8 @@ def scorer(estimator, x_test, y_test):
         roc_auc_score
     """
     y_score = estimator.decision_function(x_test)
-    return roc_auc_score(y_test, y_score)
+    cur_score = roc_auc_score(y_test, y_score)
+    return cur_score
 
 
 def unknown_pref_metric(y_true, y_pred):
@@ -280,7 +281,7 @@ def fink_ad_model_train():
             file.write(onx.SerializeToString())
         search_params_aad = {
             "n_trees": (100, 150, 200, 300, 500),
-            "n_subsamples": (obj*data[key].shape[0] for obj in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)),
+            "n_subsamples": (int(obj*data[key].shape[0]) for obj in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)),
             "tau": (1 - sum(is_unknown) / len(data[key]),),
             "n_jobs": (n_jobs,)
         }
