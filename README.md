@@ -1,5 +1,5 @@
 # Fink anomaly detection model
-The module is designed to train a model to detect anomalies in photometric data (currently using the IsolationForest model).
+The module is designed to train a model to detect anomalies in photometric data.
 
 **positional arguments:**
 
