@@ -75,8 +75,8 @@ def get_reactions():
     
     if not 'TG' in config.sections() or not 'SLACK' in config.sections():
         tg_api_id = input('Enter the TG API ID:')
-        tg_api_hash = input('Enter the TG API HASH:')
-        slack_token = input('Enter the Slack token:')
+        tg_api_hash = input('Enter the TG API HASH: ')
+        slack_token = input('Enter the Slack token: ')
         config['TG'] = {
             'ID': tg_api_id,
             'HASH': tg_api_hash

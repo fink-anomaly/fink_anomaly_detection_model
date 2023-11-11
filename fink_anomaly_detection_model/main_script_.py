@@ -279,7 +279,7 @@ def fink_ad_model_train():
         options = {id(forest_simp): {
             'score_samples': True
         }}
-        onx = to_onnx(forest_simp, initial_types=initial_type, options=options)
+        onx = to_onnx(forest_simp, initial_types=initial_type, options=options, target_opset={"ai.onnx.ml": 3})
         with open(f"forest{key}.onnx", "wb") as file:
             file.write(onx.SerializeToString())
         search_params_aad = {
