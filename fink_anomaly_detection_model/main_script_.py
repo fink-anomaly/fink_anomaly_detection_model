@@ -297,7 +297,7 @@ def fink_ad_model_train():
         reactions_dataset = pd.read_csv(f'reactions{key}.csv')
         reactions = reactions_dataset['class'].values
         reactions_dataset.drop(['class'], inplace=True, axis=1)
-        forest_simp.fit(reactions_dataset, reactions)
+        forest_simp.fit(np.array(reactions_dataset), reactions)
         onx = to_onnx_add(forest_simp, initial_types=initial_type)
         with open(f"forest{key}_AAD.onnx", "wb") as f:
             f.write(onx.SerializeToString())
