@@ -5,6 +5,7 @@ from collections import defaultdict
 from functools import lru_cache
 from random import randint, choice
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import make_scorer
