@@ -16,6 +16,7 @@ from coniferest.onnx import to_onnx as to_onnx_add
 from coniferest.aadforest import AADForest
 from sklearn.model_selection import train_test_split
 import itertools
+import reactions_reader
 
 
 def generate_param_comb(param_dict):
@@ -72,6 +73,7 @@ def train_with_forest(data, train_params, scorer_, y_true) -> IsolationForest:
     forest = IsolationForest()
     clf = GridSearchCV(forest, train_params, scoring=scorer_, verbose=2, cv=4)
     clf.fit(data.values, y_true)
+    print(f' Optimal params: {clf.best_params_}')
     return clf.best_estimator_
 
 def scorer_AAD(estimator, X_test, y_test):
@@ -189,11 +191,12 @@ def fink_ad_model_train():
 
     """
     parser = argparse.ArgumentParser(description='Fink AD model training')
-    parser.add_argument('dataset_dir', type=str, help='Input dir for dataset')
+    parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset', default='lc_features_20210617_photometry_corrected.parquet')
     parser.add_argument('--n_jobs', type=int, default=-1, help='Number of threads (default: -1)')
     args = parser.parse_args()
     train_data_path = args.dataset_dir
     n_jobs = args.n_jobs
+    reactions_reader.get_reactions()
     assert os.path.isfile(train_data_path), 'The specified training dataset file does not exist!'
     filter_base = ('_r', '_g')
     print('Loading training data...')
@@ -291,6 +294,14 @@ def fink_ad_model_train():
             scorer_AAD,
             is_unknown
         )
+        reactions_dataset = pd.read_csv(f'reactions{key}.csv')
+        reactions = reactions_dataset['class']
+        reactions_dataset.drop(['class'], inplace=True)
+        forest_simp.fit(reactions_dataset, reactions)
         onx = to_onnx_add(forest_simp, initial_types=initial_type)
         with open(f"forest{key}_AAD.onnx", "wb") as f:
             f.write(onx.SerializeToString())
+
+
+if __name__=='__main__':
+    fink_ad_model_train()
