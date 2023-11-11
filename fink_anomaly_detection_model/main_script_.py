@@ -258,30 +258,30 @@ def fink_ad_model_train():
     print('Training...')
     for key in filter_base:
         is_unknown = classes[key] == 'Unknown'
-        search_params_unknown = {
-            'n_estimators': (100, 150, 200, 300, 500),
-            'max_features':(0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-            'contamination': (sum(is_unknown) / len(data[key]),),
-            'bootstrap': (True,),
-            'max_samples': (0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-            'n_jobs': (n_jobs,)
-        }
-        forest_simp = train_with_forest(
-            data[key],
-            search_params_unknown,
-            scorer,
-            is_unknown
-        )
-        with open(f'forest{key}.pickle', 'wb') as handle:
-            pickle.dump(forest_simp, handle)
-        forest_simp._max_features = 18
+        # search_params_unknown = {
+        #     'n_estimators': (100, 150, 200, 300, 500),
+        #     'max_features':(0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+        #     'contamination': (sum(is_unknown) / len(data[key]),),
+        #     'bootstrap': (True,),
+        #     'max_samples': (0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+        #     'n_jobs': (n_jobs,)
+        # }
+        # forest_simp = train_with_forest(
+        #     data[key],
+        #     search_params_unknown,
+        #     scorer,
+        #     is_unknown
+        # )
+        # with open(f'forest{key}.pickle', 'wb') as handle:
+        #     pickle.dump(forest_simp, handle)
+        # forest_simp._max_features = 18
         initial_type = [('X', FloatTensorType([None, data[key].shape[1]]))]
-        options = {id(forest_simp): {
-            'score_samples': True
-        }}
-        onx = to_onnx(forest_simp, initial_types=initial_type, options=options, target_opset={"ai.onnx.ml": 3})
-        with open(f"forest{key}.onnx", "wb") as file:
-            file.write(onx.SerializeToString())
+        # options = {id(forest_simp): {
+        #     'score_samples': True
+        # }}
+        # onx = to_onnx(forest_simp, initial_types=initial_type, options=options, target_opset={"ai.onnx.ml": 3})
+        # with open(f"forest{key}.onnx", "wb") as file:
+        #     file.write(onx.SerializeToString())
         search_params_aad = {
             "n_trees": (100, 150, 200, 300, 500),
             "n_subsamples": (int(obj*data[key].shape[0]) for obj in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)),
