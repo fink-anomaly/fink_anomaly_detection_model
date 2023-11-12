@@ -6,8 +6,11 @@ A set of modules for training models for finding anomalies in photometric data. 
 The module trains the AADForest model using expert reactions from the C055ZJJ6N2AE channels in Slack and -1001898265997 in Telegram. It creates the following files:
 - _g_means.csv and _r_means.csv -- averages over the training dataset;
 - _reactions_g.csv and _reactions_r.csv -- training datasets for additional training of the AADForest algorithm, based on expert reactions from Slack and Telegram channels;
+- forest_g_AAD.onnx -- model for _g filter
+- forest_r_AAD.onnx -- model for _r filter
 
 **optional arguments:**
+
   --dataset_dir DATASET_DIR
                         Input dir for dataset (default: './lc_features_20210617_photometry_corrected.parquet')
 						
@@ -27,7 +30,8 @@ Uploading anomaly reactions from messengers. It creates the following files:
 
 
 
-optional arguments:
+**optional arguments:**
+
   --slack_channel SLACK_CHANNEL
                         Slack Channel ID (default: 'C055ZJJ6N2AE')
   --tg_channel TG_CHANNEL

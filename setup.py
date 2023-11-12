@@ -7,8 +7,8 @@ def readme():
 
 
 setup(name='fink_anomaly_detection_model',
-      version='0.4.13',
-      description='Fink anomaly detection model',
+      version='0.4.14',
+      description='Fink SNAD Anomaly Detection Model',
       packages=find_packages(),
       author_email='timofei.psheno@gmail.com',
       install_requires=['scikit-learn>=1.3.1', 'numpy>=1.23.5',
