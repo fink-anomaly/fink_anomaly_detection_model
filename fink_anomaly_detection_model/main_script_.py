@@ -208,6 +208,7 @@ def fink_ad_model_train():
     parser = argparse.ArgumentParser(description='Fink AD model training')
     parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset', default='lc_features_20210617_photometry_corrected.parquet')
     parser.add_argument('--n_jobs', type=int, default=-1, help='Number of threads (default: -1)')
+    parser.add_argument('-c', help='Contamination is null')
     args = parser.parse_args()
     train_data_path = args.dataset_dir
     n_jobs = args.n_jobs
@@ -306,9 +307,13 @@ def fink_ad_model_train():
         # with open(f"forest{key}.onnx", "wb") as file:
         #     file.write(onx.SerializeToString())
         search_params_aad = {
-            "n_trees": (100, 150, 200, 300, 500),
+            "n_trees": (100, 150, 200, 300, 500, 700, 1024),
             "n_subsamples": (int(obj*data[key].shape[0]) for obj in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)),
-            "tau": (1 - sum(is_unknown) / len(data[key]),),
+            "tau": (1 - sum(is_unknown) / len(data[key]), ),
+            "n_jobs": (n_jobs,)
+        } if not args.c else {
+            "n_trees": (100, 150, 200, 300, 500, 700, 1024),
+            "n_subsamples": (int(obj*data[key].shape[0]) for obj in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)),
             "n_jobs": (n_jobs,)
         }
         forest_simp = train_base_AAD(
