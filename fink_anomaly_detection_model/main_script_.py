@@ -198,7 +198,7 @@ def fink_ad_model_train():
     train_data_path = args.dataset_dir
     n_jobs = args.n_jobs
     #reactions_reader.get_reactions()
-    assert os.path.exists(train_data_path) or , 'The specified training dataset file does not exist!'
+    assert os.path.exists(train_data_path), 'The specified training dataset file does not exist!'
     filter_base = ('_r', '_g')
     print('Loading training data...')
     x_buf_data = pd.read_parquet(train_data_path)
@@ -207,13 +207,14 @@ def fink_ad_model_train():
         extract_one(data, "1")).add_suffix("_r")
     features_2 = x_buf_data["lc_features"].apply(lambda data:
         extract_one(data, "2")).add_suffix("_g")
-
+    x_buf_data = x_buf_data.rename(columns={'finkclass':'class'}, errors='ignore')
     print('Filtering...')
     data = pd.concat([
-    x_buf_data.drop(['lc_features', 'cjd', 'cfid', 'cmag', 'cerrmag', 'is_null'], axis=1),
+    x_buf_data['objectId', 'candid', 'class'],
     features_1,
     features_2,
     ], axis=1).dropna(axis=0)
+    
 
     datasets = defaultdict(lambda: defaultdict(list))
 
