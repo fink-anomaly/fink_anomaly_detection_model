@@ -231,7 +231,7 @@ def fink_ad_model_train():
     x_buf_data = x_buf_data.rename(columns={'finkclass':'class'}, errors='ignore')
     print('Filtering...')
     data = pd.concat([
-    x_buf_data['objectId', 'candid', 'class'],
+    x_buf_data[['objectId', 'candid', 'class']],
     features_1,
     features_2,
     ], axis=1).dropna(axis=0)

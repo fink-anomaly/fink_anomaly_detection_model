@@ -7,7 +7,7 @@ def readme():
 
 
 setup(name='fink_anomaly_detection_model',
-      version='0.4.19',
+      version='0.4.20',
       description='Fink SNAD Anomaly Detection Model',
       packages=find_packages(),
       author_email='timofei.psheno@gmail.com',
