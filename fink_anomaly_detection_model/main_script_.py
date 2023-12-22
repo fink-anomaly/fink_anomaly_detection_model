@@ -198,7 +198,7 @@ def fink_ad_model_train():
     train_data_path = args.dataset_dir
     n_jobs = args.n_jobs
     #reactions_reader.get_reactions()
-    assert os.path.isfile(train_data_path), 'The specified training dataset file does not exist!'
+    assert os.path.exists(train_data_path) or , 'The specified training dataset file does not exist!'
     filter_base = ('_r', '_g')
     print('Loading training data...')
     x_buf_data = pd.read_parquet(train_data_path)
