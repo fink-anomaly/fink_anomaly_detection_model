@@ -217,7 +217,7 @@ def fink_ad_model_train():
     print('Loading training data...')
     x_buf_data = pd.read_parquet(train_data_path)
     print(f'data shape: {x_buf_data.shape}')
-    if "lc_features" not in x_buf_data.columns:
+    if "lc_features_r" not in x_buf_data.columns:
         features_1 = x_buf_data["lc_features"].apply(lambda data:
             extract_one(data, "1")).add_suffix("_r")
         features_2 = x_buf_data["lc_features"].apply(lambda data:
