@@ -34,6 +34,7 @@ Uploading anomaly reactions from messengers. It creates the following files:
 
   --slack_channel SLACK_CHANNEL
                         Slack Channel ID (default: 'C055ZJJ6N2AE')
+  
   --tg_channel TG_CHANNEL
                         Telegram Channel ID (default: -1001898265997)
 
