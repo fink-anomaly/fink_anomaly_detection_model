@@ -179,6 +179,20 @@ def unknown_and_custom_loss(model, x_data, true_is_anomaly):
     return (found / len_for_check) * 100
 
 
+def extract_all(data) -> pd.Series:
+    """
+    Function for extracting data from lc_features
+    :param data: dict
+                lc_features dict
+    :param key: str
+                Name of the extracted filter
+    :return: pd.DataFrame
+                Dataframe with a specific filter
+    """
+    series = pd.Series(data, dtype=float)
+    return series
+
+
 def fink_ad_model_train():
     """
     :return: None
@@ -203,10 +217,17 @@ def fink_ad_model_train():
     print('Loading training data...')
     x_buf_data = pd.read_parquet(train_data_path)
     print(f'data shape: {x_buf_data.shape}')
-    features_1 = x_buf_data["lc_features"].apply(lambda data:
-        extract_one(data, "1")).add_suffix("_r")
-    features_2 = x_buf_data["lc_features"].apply(lambda data:
-        extract_one(data, "2")).add_suffix("_g")
+    if "lc_features" not in x_buf_data.columns:
+        features_1 = x_buf_data["lc_features"].apply(lambda data:
+            extract_one(data, "1")).add_suffix("_r")
+        features_2 = x_buf_data["lc_features"].apply(lambda data:
+            extract_one(data, "2")).add_suffix("_g")
+    else:
+        features_1 = x_buf_data["lc_features_r"].apply(lambda data:
+            extract_all(data)).add_suffix("_r")
+        features_2 = x_buf_data["lc_features_g"].apply(lambda data:
+            extract_all(data)).add_suffix("_g")
+        
     x_buf_data = x_buf_data.rename(columns={'finkclass':'class'}, errors='ignore')
     print('Filtering...')
     data = pd.concat([
