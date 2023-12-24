@@ -7,7 +7,7 @@ def readme():
 
 
 setup(name='fink_anomaly_detection_model',
-      version='0.4.23',
+      version='0.4.24',
       description='Fink SNAD Anomaly Detection Model',
       packages=find_packages(),
       author_email='timofei.psheno@gmail.com',
@@ -18,7 +18,8 @@ setup(name='fink_anomaly_detection_model',
       entry_points={
         'console_scripts': [
             'fink_ad_model_train = fink_anomaly_detection_model:fink_ad_model_train',
-            'get_anomaly_reactions = fink_anomaly_detection_model:get_reactions'
+            'get_anomaly_reactions = fink_anomaly_detection_model:get_reactions',
+            'data_transform = fink_anomaly_detection_model:data_transform'
         ],
     },
     python_requires='>=3.7',
