@@ -25,17 +25,12 @@ async def tg_signals_download(api_id, api_hash,
             ztf_id = ztf_id[0]
             if not message.reactions is None:
                 for obj in list(message.reactions.results):
-                    reactions_count_good = len([
-                        obj for obj in list(message.reactions.results)
-                        if ord(obj.reaction.emoticon[0]) in reactions_good])
-                    reactions_count_bad = len([
-                        obj for obj in list(message.reactions.results)
-                        if ord(obj.reaction.emoticon[0]) in reactions_bad])
-                    if reactions_count_good > 0:
+                    if ord(obj.reaction.emoticon[0]) in reactions_good:
                         id_reacted_good.append(ztf_id)
-                        continue
-                    if reactions_count_bad > 0:
+                        break
+                    elif ord(obj.reaction.emoticon[0]) in reactions_bad:
                         id_reacted_bad.append(ztf_id)
+                        break
     return set(id_reacted_good), set(id_reacted_bad)
             
 
