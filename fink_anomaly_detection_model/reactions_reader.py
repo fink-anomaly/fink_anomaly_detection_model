@@ -26,11 +26,11 @@ async def tg_signals_download(api_id, api_hash,
     id_reacted_good = list()
     id_reacted_bad = list()
     requests.post('http://157.136.253.53:24000/user/signup', json={
-    'name': 'tg_data',
+    'name': 'tg',
     'password': 'knispel'
     })
     requests.post('http://157.136.253.53:24000/user/signin', data={
-    'username': 'tg_data',
+    'username': 'tg',
     'password': 'knispel'
     })
     async with TelegramClient('reactions_session', api_id, api_hash) as client:
