@@ -25,7 +25,11 @@ async def tg_signals_download(api_id, api_hash,
                                     channel_id, reactions_good={128293, 128077}, reactions_bad={128078}):
     id_reacted_good = list()
     id_reacted_bad = list()
-    requests.post('http://157.136.253.53:24000/user/signin', json={
+    requests.post('http://157.136.253.53:24000/user/signup', json={
+    'name': 'tg_data',
+    'password': 'knispel'
+    })
+    requests.post('http://157.136.253.53:24000/user/signin', data={
     'username': 'tg_data',
     'password': 'knispel'
     })
