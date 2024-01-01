@@ -126,7 +126,7 @@ def get_reactions():
         pdf[feature_names] = pdf[section].to_list()
         pdf_gf = pdf.drop(feature_columns, axis=1).rename(columns={'i:objectId': 'object_id'})
         classes = np.where(pdf_gf['object_id'].isin(good_reactions), True, False)
-        pdf_gf.drop(['object_id'], axis=1, inplace=True)
+        #pdf_gf.drop(['object_id'], axis=1, inplace=True)
         pdf_gf = pdf_gf.reindex(sorted(pdf_gf.columns), axis=1)
         pdf_gf.drop(common_rems, axis=1, inplace=True)
         pdf_gf['class'] = classes
