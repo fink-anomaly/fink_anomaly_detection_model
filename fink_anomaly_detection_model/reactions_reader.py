@@ -13,23 +13,38 @@ import argparse
 import configparser
 
 
+
+def load_on_server(ztf_id, time, label):
+    requests.post('http://157.136.253.53:24000/reaction/new', json={
+    'ztf_id': ztf_id,
+    'tag': label,
+    'changed_at': time})
+
+
 async def tg_signals_download(api_id, api_hash,
                                     channel_id, reactions_good={128293, 128077}, reactions_bad={128078}):
     id_reacted_good = list()
     id_reacted_bad = list()
+    requests.post('http://157.136.253.53:24000/user/signin', json={
+    'username': 'tg_data',
+    'password': 'knispel'
+    })
     async with TelegramClient('reactions_session', api_id, api_hash) as client:
         async for message in client.iter_messages(channel_id):
             ztf_id = re.findall("ZTF\S*", str(message.message))
             if len(ztf_id) == 0:
                 continue
+            notif_time = str(message.date)
             ztf_id = ztf_id[0]
             if not message.reactions is None:
                 for obj in list(message.reactions.results):
                     if ord(obj.reaction.emoticon[0]) in reactions_good:
                         id_reacted_good.append(ztf_id)
+                        load_on_server(ztf_id, notif_time, "ANOMALY")
                         break
                     elif ord(obj.reaction.emoticon[0]) in reactions_bad:
                         id_reacted_bad.append(ztf_id)
+                        load_on_server(ztf_id, notif_time, "NOT ANOMALY")
                         break
     return set(id_reacted_good), set(id_reacted_bad)
             
