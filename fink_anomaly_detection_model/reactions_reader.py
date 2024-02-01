@@ -25,14 +25,6 @@ async def tg_signals_download(api_id, api_hash,
                                     channel_id, reactions_good={128293, 128077}, reactions_bad={128078}):
     id_reacted_good = list()
     id_reacted_bad = list()
-    requests.post('http://157.136.253.53:24000/user/signup', json={
-    'name': 'tg',
-    'password': 'knispel'
-    })
-    requests.post('http://157.136.253.53:24000/user/signin', data={
-    'username': 'tg',
-    'password': 'knispel'
-    })
     async with TelegramClient('reactions_session', api_id, api_hash) as client:
         async for message in client.iter_messages(channel_id):
             ztf_id = re.findall("ZTF\S*", str(message.message))
@@ -145,12 +137,13 @@ def get_reactions():
         pdf[feature_names] = pdf[section].to_list()
         pdf_gf = pdf.drop(feature_columns, axis=1).rename(columns={'i:objectId': 'object_id'})
         classes = np.where(pdf_gf['object_id'].isin(good_reactions), True, False)
-        #pdf_gf.drop(['object_id'], axis=1, inplace=True)
+        
         pdf_gf = pdf_gf.reindex(sorted(pdf_gf.columns), axis=1)
         pdf_gf.drop(common_rems, axis=1, inplace=True)
         pdf_gf['class'] = classes
         pdf_gf.dropna(inplace=True)
-        pdf_gf.drop_duplicates(inplace=True)
+        pdf_gf.drop_duplicates(subset=['object_id'], inplace=True)
+        #pdf_gf.drop(['object_id'], axis=1, inplace=True)
         pdf_gf.to_csv(f'reactions_{section[-1]}.csv', index=False)
     print('OK')
 
