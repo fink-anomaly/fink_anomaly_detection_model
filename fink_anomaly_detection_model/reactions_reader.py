@@ -142,8 +142,8 @@ def get_reactions():
         pdf_gf.drop(common_rems, axis=1, inplace=True)
         pdf_gf['class'] = classes
         pdf_gf.dropna(inplace=True)
-        pdf_gf = pdf_gf.drop_duplicates(subset=['object_id'])
-        #pdf_gf.drop(['object_id'], axis=1, inplace=True)
+        pdf_gf.drop_duplicates(subset=['object_id'], inplace=True)
+        pdf_gf.drop(['object_id'], axis=1, inplace=True)
         pdf_gf.to_csv(f'reactions_{section[-1]}.csv', index=False)
     print('OK')
 
