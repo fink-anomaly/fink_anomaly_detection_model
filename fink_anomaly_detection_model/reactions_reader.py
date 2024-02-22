@@ -42,9 +42,8 @@ def base_auth(password):
     return f'Bearer {r["access_token"]}'
 
 
-async def tg_signals_download(api_id, api_hash,
-                                    channel_id, reactions_good={128293, 128077}, reactions_bad={128078},
-                                    token):
+async def tg_signals_download(token, api_id, api_hash,
+                                    channel_id, reactions_good={128293, 128077}, reactions_bad={128078}):
     id_reacted_good = list()
     id_reacted_bad = list()
     
@@ -124,7 +123,7 @@ def get_reactions():
     
     
     print('Uploading reactions from messengers...')
-    tg_good_reactions, tg_bad_reactions = asyncio.run(tg_signals_download(tg_api_id, tg_api_hash, args.tg_channel, token))
+    tg_good_reactions, tg_bad_reactions = asyncio.run(token, tg_signals_download(tg_api_id, tg_api_hash, args.tg_channel))
     print('TG: OK')
     slack_good_reactions, slack_bad_reactions = asyncio.run(slack_signals_download(slack_token, args.slack_channel))
     print('Slack: OK')
