@@ -14,17 +14,40 @@ import configparser
 
 
 
-def load_on_server(ztf_id, time, label):
-    requests.post('http://157.136.253.53:24000/reaction/new', json={
-    'ztf_id': ztf_id,
-    'tag': label,
-    'changed_at': time})
+def load_on_server(ztf_id, time, label, token):
+    return requests.post(
+    'http://157.136.253.53:24000/reaction/new', json={
+        'ztf_id': ztf_id,
+        'tag': label,
+        'changed_at': time
+        },
+        headers={
+        'Authorization': token
+        }
+    ).text
+
+
+def base_auth(password):
+    requests.post(
+    'http://157.136.253.53:24000/user/signup', json={
+            'name': 'tg_data',
+            'password': password
+        }
+    )
+    r = requests.post('http://157.136.253.53:24000/user/signin', data={
+    'username': 'tg_data',
+    'password': password
+    })
+    r = json.loads(r.text)
+    return f'Bearer {r['access_token']}'
 
 
 async def tg_signals_download(api_id, api_hash,
-                                    channel_id, reactions_good={128293, 128077}, reactions_bad={128078}):
+                                    channel_id, reactions_good={128293, 128077}, reactions_bad={128078},
+                                    token):
     id_reacted_good = list()
     id_reacted_bad = list()
+    
     async with TelegramClient('reactions_session', api_id, api_hash) as client:
         async for message in client.iter_messages(channel_id):
             ztf_id = re.findall("ZTF\S*", str(message.message))
@@ -36,11 +59,13 @@ async def tg_signals_download(api_id, api_hash,
                 for obj in list(message.reactions.results):
                     if ord(obj.reaction.emoticon[0]) in reactions_good:
                         id_reacted_good.append(ztf_id)
-                        load_on_server(ztf_id, notif_time, "ANOMALY")
+                        print(ztf_id)
+                        print(load_on_server(ztf_id, notif_time, "ANOMALY", token))
                         break
                     elif ord(obj.reaction.emoticon[0]) in reactions_bad:
                         id_reacted_bad.append(ztf_id)
-                        load_on_server(ztf_id, notif_time, "NOT ANOMALY")
+                        print(ztf_id)
+                        print(load_on_server(ztf_id, notif_time, "NOT ANOMALY", token))
                         break
     return set(id_reacted_good), set(id_reacted_bad)
             
@@ -94,9 +119,12 @@ def get_reactions():
         slack_token = config['SLACK']['TOKEN']
         tg_api_id = config['TG']['ID']
         tg_api_hash = config['TG']['HASH']
+    token = base_auth(config['BASE']['PASSWORD'])
+    
+    
     
     print('Uploading reactions from messengers...')
-    tg_good_reactions, tg_bad_reactions = asyncio.run(tg_signals_download(tg_api_id, tg_api_hash, args.tg_channel))
+    tg_good_reactions, tg_bad_reactions = asyncio.run(tg_signals_download(tg_api_id, tg_api_hash, args.tg_channel, token))
     print('TG: OK')
     slack_good_reactions, slack_bad_reactions = asyncio.run(slack_signals_download(slack_token, args.slack_channel))
     print('Slack: OK')
