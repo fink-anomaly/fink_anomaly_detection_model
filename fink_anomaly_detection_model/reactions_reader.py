@@ -39,7 +39,7 @@ def base_auth(password):
     'password': password
     })
     r = json.loads(r.text)
-    return f'Bearer {r['access_token']}'
+    return f'Bearer {r["access_token"]}'
 
 
 async def tg_signals_download(api_id, api_hash,
