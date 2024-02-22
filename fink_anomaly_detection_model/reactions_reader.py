@@ -123,7 +123,7 @@ def get_reactions():
     
     
     print('Uploading reactions from messengers...')
-    tg_good_reactions, tg_bad_reactions = asyncio.run(token, tg_signals_download(tg_api_id, tg_api_hash, args.tg_channel))
+    tg_good_reactions, tg_bad_reactions = asyncio.run(tg_signals_download(token, tg_api_id, tg_api_hash, args.tg_channel))
     print('TG: OK')
     slack_good_reactions, slack_bad_reactions = asyncio.run(slack_signals_download(slack_token, args.slack_channel))
     print('Slack: OK')
