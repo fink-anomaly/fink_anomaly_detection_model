@@ -1,4 +1,7 @@
 # Fink anomaly detection model
+
+Здесь пока куча косяков, в обозримом будущем постараюсь их поправить
+
 A set of modules for training models for finding anomalies in photometric data. There are currently two entry points via the console: _fink_ad_model_train_ and _get_anomaly_reactions_.
 
 ##  fink_ad_model_train
