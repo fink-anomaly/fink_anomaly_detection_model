@@ -27,7 +27,9 @@ def generate_param_comb(param_dict):
         yield dict(zip(columns, obj))
 
 
-def train_base_AAD(data: pd.DataFrame, train_params, scorer, y_true):
+def train_base_AAD(data: pd.DataFrame, train_params, scorer, y_true, use_default_model=False):
+    if use_default_model:
+        return AADForest().fit(data.values)
     X_train, X_test, y_train, y_test = train_test_split(
         data.values, y_true, test_size=0.2, random_state=42)
     best_est = (0, None, None)
@@ -320,7 +322,8 @@ def fink_ad_model_train():
             data[key],
             search_params_aad,
             scorer_AAD,
-            is_unknown
+            is_unknown,
+            use_default_model=True
         )
         reactions_dataset = pd.read_csv(f'reactions{key}.csv')
         reactions = reactions_dataset['class'].values

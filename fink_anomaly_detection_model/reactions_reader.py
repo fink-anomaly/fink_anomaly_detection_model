@@ -59,12 +59,12 @@ async def tg_signals_download(token, api_id, api_hash,
                     if ord(obj.reaction.emoticon[0]) in reactions_good:
                         id_reacted_good.append(ztf_id)
                         print(ztf_id)
-                        print(load_on_server(ztf_id, notif_time, "ANOMALY", token))
+                        #print(load_on_server(ztf_id, notif_time, "ANOMALY", token))
                         break
                     elif ord(obj.reaction.emoticon[0]) in reactions_bad:
                         id_reacted_bad.append(ztf_id)
                         print(ztf_id)
-                        print(load_on_server(ztf_id, notif_time, "NOT ANOMALY", token))
+                        #print(load_on_server(ztf_id, notif_time, "NOT ANOMALY", token))
                         break
     return set(id_reacted_good), set(id_reacted_bad)
             
@@ -118,12 +118,12 @@ def get_reactions():
         slack_token = config['SLACK']['TOKEN']
         tg_api_id = config['TG']['ID']
         tg_api_hash = config['TG']['HASH']
-    token = base_auth(config['BASE']['PASSWORD'])
+    #token = base_auth(config['BASE']['PASSWORD'])
     
     
     
     print('Uploading reactions from messengers...')
-    tg_good_reactions, tg_bad_reactions = asyncio.run(tg_signals_download(token, tg_api_id, tg_api_hash, args.tg_channel))
+    tg_good_reactions, tg_bad_reactions = asyncio.run(tg_signals_download('', tg_api_id, tg_api_hash, args.tg_channel))
     print('TG: OK')
     slack_good_reactions, slack_bad_reactions = asyncio.run(slack_signals_download(slack_token, args.slack_channel))
     print('Slack: OK')
@@ -140,7 +140,7 @@ def get_reactions():
         }
     )
     if r.status_code != 200:
-        print('Fink API error')
+        print(r.text)
         return
     else:
         print('Fink API: OK')

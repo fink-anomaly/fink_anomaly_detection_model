@@ -4,3 +4,4 @@ tokens.py
 lc_features*
 *.ini
 *.session
+!*.py
