@@ -5,6 +5,9 @@ from collections import defaultdict
 from functools import lru_cache
 from random import randint, choice
 import pandas as pd
+import psutil
+import os
+import time
 import numpy as np
 from tqdm import tqdm
 from sklearn.ensemble import IsolationForest
@@ -335,4 +338,15 @@ def fink_ad_model_train():
 
 
 if __name__=='__main__':
+    start_time = time.time()
+    process = psutil.Process(os.getpid())
     fink_ad_model_train()
+    end_time = time.time()
+    execution_time = end_time - start_time
+
+    # Получаем использование ОЗУ
+    memory_info = process.memory_info()
+    memory_usage = memory_info.rss / (1024 ** 2)  # Преобразуем в МБ
+
+    print(f"Время выполнения: {execution_time:.2f} секунд")
+    print(f"Использование ОЗУ: {memory_usage:.2f} МБ")
