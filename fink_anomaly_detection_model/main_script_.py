@@ -271,14 +271,14 @@ def fink_ad_model_train():
     assert data['_r'].shape[1] == data['_g'].shape[1], '''Mismatch of the dimensions of r/g!'''
     classes = {filter_ : data[filter_]['class'] for filter_ in filter_base}
     common_rems = [
-        'percent_amplitude',
-        'linear_fit_reduced_chi2',
-        'inter_percentile_range_10',
-        'mean_variance',
-        'linear_trend',
-        'standard_deviation',
-        'weighted_mean',
-        'mean'
+        # 'percent_amplitude',
+        # 'linear_fit_reduced_chi2',
+        # 'inter_percentile_range_10',
+        # 'mean_variance',
+        # 'linear_trend',
+        # 'standard_deviation',
+        # 'weighted_mean',
+        # 'mean'
     ]
     data = {key : item.drop(labels=['object_id', 'class'] + common_rems,
                 axis=1) for key, item in data.items()}
@@ -286,52 +286,22 @@ def fink_ad_model_train():
         item.mean().to_csv(f'{key}_means.csv')
     print('Training...')
     for key in filter_base:
-        is_unknown = classes[key] == 'Unknown'
-        # search_params_unknown = {
-        #     'n_estimators': (100, 150, 200, 300, 500),
-        #     'max_features':(0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-        #     'contamination': (sum(is_unknown) / len(data[key]),),
-        #     'bootstrap': (True,),
-        #     'max_samples': (0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-        #     'n_jobs': (n_jobs,)
-        # }
-        # forest_simp = train_with_forest(
-        #     data[key],
-        #     search_params_unknown,
-        #     scorer,
-        #     is_unknown
-        # )
-        # with open(f'forest{key}.pickle', 'wb') as handle:
-        #     pickle.dump(forest_simp, handle)
-        # forest_simp._max_features = 18
         initial_type = [('X', FloatTensorType([None, data[key].shape[1]]))]
-        # options = {id(forest_simp): {
-        #     'score_samples': True
-        # }}
-        # onx = to_onnx(forest_simp, initial_types=initial_type, options=options, target_opset={"ai.onnx.ml": 3})
-        # with open(f"forest{key}.onnx", "wb") as file:
-        #     file.write(onx.SerializeToString())
-        search_params_aad = {
-            "n_trees": (100, 150, 200, 300, 500, 700, 1024),
-            "n_subsamples": (int(obj*data[key].shape[0]) for obj in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)),
-            "tau": (1 - sum(is_unknown) / len(data[key]), ),
-            "n_jobs": (n_jobs,)
-        } if not args.c else {
-            "n_trees": (100, 150, 200, 300, 500, 700, 1024),
-            "n_subsamples": (int(obj*data[key].shape[0]) for obj in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)),
-            "n_jobs": (n_jobs,)
-        }
-        forest_simp = train_base_AAD(
-            data[key],
-            search_params_aad,
-            scorer_AAD,
-            is_unknown,
-            use_default_model=True
-        )
         reactions_dataset = pd.read_csv(f'reactions{key}.csv')
         reactions = reactions_dataset['class'].values
         reactions_dataset.drop(['class'], inplace=True, axis=1)
-        forest_simp.fit(np.array(reactions_dataset), reactions)
+        forest_simp = AADForest(
+            n_trees=150,
+            n_subsamples=int(0.5*len(data[key])),
+            tau=0.97,
+            C_a=1.0,
+            n_jobs=1,
+            random_seed=42
+        ).fit_known(
+            data[key].values,
+            known_data=reactions_dataset.values,
+            known_labels=reactions
+        )
         onx = to_onnx_add(forest_simp, initial_types=initial_type)
         with open(f"forest{key}_AAD.onnx", "wb") as f:
             f.write(onx.SerializeToString())

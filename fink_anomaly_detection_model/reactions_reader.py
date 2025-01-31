@@ -11,7 +11,7 @@ import numpy as np
 import config
 import argparse
 import configparser
-
+from coniferest.labels import Label
 
 
 def load_on_server(ztf_id, time, label, token):
@@ -151,23 +151,21 @@ def get_reactions():
     pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]')]
     feature_columns = ['d:lc_features_g', 'd:lc_features_r']
     common_rems = [
-        'percent_amplitude',
-        'linear_fit_reduced_chi2',
-        'inter_percentile_range_10',
-        'mean_variance',
-        'linear_trend',
-        'standard_deviation',
-        'weighted_mean',
-        'mean'
+        # 'percent_amplitude',
+        # 'linear_fit_reduced_chi2',
+        # 'inter_percentile_range_10',
+        # 'mean_variance',
+        # 'linear_trend',
+        # 'standard_deviation',
+        # 'weighted_mean',
+        # 'mean'
     ]
     for section in feature_columns:
         pdf[feature_names] = pdf[section].to_list()
         pdf_gf = pdf.drop(feature_columns, axis=1).rename(columns={'i:objectId': 'object_id'})
-        classes = np.where(pdf_gf['object_id'].isin(good_reactions), True, False)
-        
         pdf_gf = pdf_gf.reindex(sorted(pdf_gf.columns), axis=1)
         pdf_gf.drop(common_rems, axis=1, inplace=True)
-        pdf_gf['class'] = classes
+        pdf_gf['class'] = pdf_gf['class'].apply(lambda x: Label.A if x in good_reactions else Label.R)
         pdf_gf.dropna(inplace=True)
         pdf_gf.drop_duplicates(subset=['object_id'], inplace=True)
         pdf_gf.drop(['object_id'], axis=1, inplace=True)
