@@ -132,7 +132,7 @@ def get_reactions():
     bad_reactions = tg_bad_reactions.union(slack_bad_reactions)
     oids = list(good_reactions.union(bad_reactions))
     r = requests.post(
-        'https://fink-portal.org/api/v1/objects',
+        'https://api.fink-portal.org/api/v1/objects',
         json={
             'objectId': ','.join(oids),
             'columns': 'd:lc_features_g,d:lc_features_r,i:objectId',
