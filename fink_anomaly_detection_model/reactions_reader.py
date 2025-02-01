@@ -11,7 +11,7 @@ import numpy as np
 import config
 import argparse
 import configparser
-from coniferest.labels import Label
+from coniferest.label import Label
 
 
 def load_on_server(ztf_id, time, label, token):
@@ -46,7 +46,7 @@ async def tg_signals_download(token, api_id, api_hash,
                                     channel_id, reactions_good={128293, 128077}, reactions_bad={128078}):
     id_reacted_good = list()
     id_reacted_bad = list()
-    
+
     async with TelegramClient('reactions_session', api_id, api_hash) as client:
         async for message in client.iter_messages(channel_id):
             ztf_id = re.findall("ZTF\S*", str(message.message))
@@ -55,19 +55,29 @@ async def tg_signals_download(token, api_id, api_hash,
             notif_time = str(message.date)
             ztf_id = ztf_id[0]
             if not message.reactions is None:
+                good_counter = 0
+                bad_counter = 0
                 for obj in list(message.reactions.results):
-                    if ord(obj.reaction.emoticon[0]) in reactions_good:
-                        id_reacted_good.append(ztf_id)
-                        print(ztf_id)
-                        #print(load_on_server(ztf_id, notif_time, "ANOMALY", token))
-                        break
-                    elif ord(obj.reaction.emoticon[0]) in reactions_bad:
-                        id_reacted_bad.append(ztf_id)
-                        print(ztf_id)
-                        #print(load_on_server(ztf_id, notif_time, "NOT ANOMALY", token))
-                        break
+                    try:
+                        cur_reaction = ord(obj.reaction.emoticon)
+                    except TypeError:
+                        print(f'not ord:{obj.reaction.emoticon}')
+                    if cur_reaction in reactions_good:
+                        good_counter += obj.count
+                    if cur_reaction in reactions_bad:
+                        bad_counter += obj.count
+                print('----')
+                print({obj.reaction.emoticon: obj.count for obj in list(message.reactions.results)})
+                if len(list(message.reactions.results)) == 0:
+                    continue
+                if bad_counter >= good_counter:
+                    id_reacted_bad.append(ztf_id)
+                    print(f'{ztf_id}->BAD')
+                else:
+                    id_reacted_good.append(ztf_id)
+                    print(f'{ztf_id}->GOOD')
     return set(id_reacted_good), set(id_reacted_bad)
-            
+
 
 
 async def slack_signals_download(slack_token, slack_channel):
@@ -102,7 +112,7 @@ def get_reactions():
     parser.add_argument('--slack_channel', type=str, help='Slack Channel ID', default='C055ZJ6N2AE')
     parser.add_argument('--tg_channel', type=int, help='Telegram Channel ID', default=-1001898265997)
     args = parser.parse_args()
-    
+
     if not 'TG' in config.sections() or not 'SLACK' in config.sections():
         tg_api_id = input('Enter the TG API ID:')
         tg_api_hash = input('Enter the TG API HASH: ')
@@ -119,17 +129,17 @@ def get_reactions():
         tg_api_id = config['TG']['ID']
         tg_api_hash = config['TG']['HASH']
     #token = base_auth(config['BASE']['PASSWORD'])
-    
-    
-    
+
+
+
     print('Uploading reactions from messengers...')
     tg_good_reactions, tg_bad_reactions = asyncio.run(tg_signals_download('', tg_api_id, tg_api_hash, args.tg_channel))
     print('TG: OK')
-    slack_good_reactions, slack_bad_reactions = asyncio.run(slack_signals_download(slack_token, args.slack_channel))
+    #slack_good_reactions, slack_bad_reactions = asyncio.run(slack_signals_download(slack_token, args.slack_channel))
     print('Slack: OK')
     print('The upload is completed, generation of dataframes...')
-    good_reactions = tg_good_reactions.union(slack_good_reactions)
-    bad_reactions = tg_bad_reactions.union(slack_bad_reactions)
+    good_reactions = tg_good_reactions.union({})
+    bad_reactions = tg_bad_reactions.union({})
     oids = list(good_reactions.union(bad_reactions))
     r = requests.post(
         'https://api.fink-portal.org/api/v1/objects',
