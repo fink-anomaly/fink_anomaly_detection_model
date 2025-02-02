@@ -175,7 +175,7 @@ def get_reactions():
         pdf_gf = pdf.drop(feature_columns, axis=1).rename(columns={'i:objectId': 'object_id'})
         pdf_gf = pdf_gf.reindex(sorted(pdf_gf.columns), axis=1)
         pdf_gf.drop(common_rems, axis=1, inplace=True)
-        pdf_gf['class'] = pdf_gf['class'].apply(lambda x: Label.A if x in good_reactions else Label.R)
+        pdf_gf['class'] = pdf_gf['object_id'].apply(lambda x: Label.A if x in good_reactions else Label.R)
         pdf_gf.dropna(inplace=True)
         pdf_gf.drop_duplicates(subset=['object_id'], inplace=True)
         pdf_gf.drop(['object_id'], axis=1, inplace=True)

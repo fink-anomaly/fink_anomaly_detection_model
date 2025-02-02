@@ -5,3 +5,5 @@ lc_features*
 *.ini
 *.session
 !*.py
+*.onnx
+*.parquet

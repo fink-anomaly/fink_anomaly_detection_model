@@ -233,7 +233,7 @@ def fink_ad_model_train():
             extract_all(data)).add_suffix("_r")
         features_2 = x_buf_data["lc_features_g"].apply(lambda data:
             extract_all(data)).add_suffix("_g")
-        
+
     x_buf_data = x_buf_data.rename(columns={'finkclass':'class'}, errors='ignore')
     print('Filtering...')
     data = pd.concat([
@@ -241,7 +241,7 @@ def fink_ad_model_train():
     features_1,
     features_2,
     ], axis=1).dropna(axis=0)
-    
+
 
     datasets = defaultdict(lambda: defaultdict(list))
 
@@ -298,9 +298,9 @@ def fink_ad_model_train():
             n_jobs=1,
             random_seed=42
         ).fit_known(
-            data[key].values,
-            known_data=reactions_dataset.values,
-            known_labels=reactions
+            data[key].values.copy(order='C'),
+            known_data=reactions_dataset.values.copy(order='C'),
+            known_labels=reactions.copy(order='C')
         )
         onx = to_onnx_add(forest_simp, initial_types=initial_type)
         with open(f"forest{key}_AAD.onnx", "wb") as f:
