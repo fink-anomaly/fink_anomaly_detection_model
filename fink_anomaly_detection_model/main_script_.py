@@ -271,14 +271,14 @@ def fink_ad_model_train():
     assert data['_r'].shape[1] == data['_g'].shape[1], '''Mismatch of the dimensions of r/g!'''
     classes = {filter_ : data[filter_]['class'] for filter_ in filter_base}
     common_rems = [
-        # 'percent_amplitude',
-        # 'linear_fit_reduced_chi2',
-        # 'inter_percentile_range_10',
-        # 'mean_variance',
-        # 'linear_trend',
-        # 'standard_deviation',
-        # 'weighted_mean',
-        # 'mean'
+        'percent_amplitude',
+        'linear_fit_reduced_chi2',
+        'inter_percentile_range_10',
+        'mean_variance',
+        'linear_trend',
+        'standard_deviation',
+        'weighted_mean',
+        'mean'
     ]
     data = {key : item.drop(labels=['object_id', 'class'] + common_rems,
                 axis=1) for key, item in data.items()}
