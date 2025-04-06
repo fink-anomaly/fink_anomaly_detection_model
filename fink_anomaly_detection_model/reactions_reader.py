@@ -12,8 +12,8 @@ from fink_science.ad_features.processor import FEATURES_COLS
 import argparse
 import configparser
 from coniferest.label import Label
-from fink_anomaly_detection_model.main_script_ import FILTER_BASE
 
+FILTER_BASE = ('_r', '_g')
 
 def load_on_server(ztf_id, time, label, token):
     return requests.post(
