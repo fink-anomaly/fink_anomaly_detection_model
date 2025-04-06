@@ -12,7 +12,7 @@ from fink_science.ad_features.processor import FEATURES_COLS
 import argparse
 import configparser
 from coniferest.label import Label
-from main_script_ import FILTER_BASE
+from fink_anomaly_detection_model.main_script_ import FILTER_BASE
 
 
 def load_on_server(ztf_id, time, label, token):
