@@ -8,7 +8,7 @@ import pandas as pd
 import psutil
 import os
 import time
-import numpy as np
+import io, zipfile
 from tqdm import tqdm
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import make_scorer
@@ -20,7 +20,10 @@ from coniferest.onnx import to_onnx as to_onnx_add
 from coniferest.aadforest import AADForest
 from sklearn.model_selection import train_test_split
 import itertools
-import fink_anomaly_detection_model.reactions_reader as reactions_reader
+import reactions_reader as reactions_reader
+
+
+FILTER_BASE = ('_r', '_g')
 
 
 def generate_param_comb(param_dict):
@@ -201,7 +204,7 @@ def extract_all(data) -> pd.Series:
 def fink_ad_model_train():
     """
     :return: None
-    The function saves 6 files in the call directory:
+    The function saves 3 files in the call directory:
         forest_g.onnx - Trained model for filter _g in the format onnx
         forest_r.onnx - Trained model for filter _r in the format onnx
         forest_g.pickle - Trained model for filter _g in the format pickle
@@ -212,12 +215,17 @@ def fink_ad_model_train():
     """
     parser = argparse.ArgumentParser(description='Fink AD model training')
     parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset', default='lc_features_20210617_photometry_corrected.parquet')
-    parser.add_argument('--n_jobs', type=int, default=-1, help='Number of threads (default: -1)')
     parser.add_argument('-c', help='Contamination is null')
+    parser.add_argument('--load_user', type=str, default='', help='Load user from anomaly base')
     args = parser.parse_args()
     train_data_path = args.dataset_dir
-    n_jobs = args.n_jobs
-    #reactions_reader.get_reactions()
+    reactions_datasets = None
+    name = None
+    if args.load_user:
+        reactions_datasets = reactions_reader.load_reactions(args.load_user)
+        name = args.load_user
+    else:
+        reactions_reader.get_reactions()
     assert os.path.exists(train_data_path), 'The specified training dataset file does not exist!'
     filter_base = ('_r', '_g')
     print('Loading training data...')
@@ -241,8 +249,6 @@ def fink_ad_model_train():
     features_1,
     features_2,
     ], axis=1).dropna(axis=0)
-
-
     datasets = defaultdict(lambda: defaultdict(list))
 
     with tqdm(total=len(data)) as pbar:
@@ -269,7 +275,6 @@ def fink_ad_model_train():
         main_data[passband] = new_df
     data = {key : main_data[key] for key in filter_base}
     assert data['_r'].shape[1] == data['_g'].shape[1], '''Mismatch of the dimensions of r/g!'''
-    classes = {filter_ : data[filter_]['class'] for filter_ in filter_base}
     common_rems = [
         'percent_amplitude',
         'linear_fit_reduced_chi2',
@@ -285,9 +290,13 @@ def fink_ad_model_train():
     for key, item in data.items():
         item.mean().to_csv(f'{key}_means.csv')
     print('Training...')
+    result_models_IO = []
     for key in filter_base:
         initial_type = [('X', FloatTensorType([None, data[key].shape[1]]))]
-        reactions_dataset = pd.read_csv(f'reactions{key}.csv')
+        if reactions_datasets is not None:
+            reactions_dataset = reactions_datasets[key]
+        else:
+            reactions_dataset = pd.read_csv(f'reactions{key}.csv')
         reactions = reactions_dataset['class'].values
         reactions_dataset.drop(['class'], inplace=True, axis=1)
         forest_simp = AADForest(
@@ -303,8 +312,14 @@ def fink_ad_model_train():
             known_labels=reactions.copy(order='C')
         )
         onx = to_onnx_add(forest_simp, initial_types=initial_type)
-        with open(f"forest{key}_AAD.onnx", "wb") as f:
-            f.write(onx.SerializeToString())
+        result_models_IO.append(onx.SerializeToString())
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr(f'forest{FILTER_BASE[0]}_AAD_{name}.onnx', result_models_IO[0])
+        zip_file.writestr(f'forest{FILTER_BASE[1]}_AAD_{name}.onnx', result_models_IO[1])
+    zip_buffer.seek(0)
+    with open(f'anomaly_detection_forest_AAD_{name}.zip', 'wb') as f:
+        f.write(zip_buffer.getvalue())
 
 
 if __name__=='__main__':
@@ -314,9 +329,8 @@ if __name__=='__main__':
     end_time = time.time()
     execution_time = end_time - start_time
 
-    # Получаем использование ОЗУ
     memory_info = process.memory_info()
-    memory_usage = memory_info.rss / (1024 ** 2)  # Преобразуем в МБ
+    memory_usage = memory_info.rss / (1024 ** 2)
 
     print(f"Время выполнения: {execution_time:.2f} секунд")
     print(f"Использование ОЗУ: {memory_usage:.2f} МБ")

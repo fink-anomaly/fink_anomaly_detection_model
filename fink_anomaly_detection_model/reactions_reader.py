@@ -3,15 +3,16 @@ from telethon import TelegramClient
 import re
 from slack_sdk import WebClient
 import io
+from typing import List, Optional
 import requests
+import os
 import pandas as pd
 import json
 from fink_science.ad_features.processor import FEATURES_COLS
-import numpy as np
-import config
 import argparse
 import configparser
 from coniferest.label import Label
+from main_script_ import FILTER_BASE
 
 
 def load_on_server(ztf_id, time, label, token):
@@ -181,6 +182,68 @@ def get_reactions():
         pdf_gf.drop(['object_id'], axis=1, inplace=True)
         pdf_gf.to_csv(f'reactions_{section[-1]}.csv', index=False)
     print('OK')
+
+def load_base(positive: List[str], negative: List[str]):
+    print('Getting current reactions...')
+    good_reactions = set(positive)
+    bad_reactions = set(negative)
+    oids = list(good_reactions.union(bad_reactions))
+    r = requests.post(
+        'https://api.fink-portal.org/api/v1/objects',
+        json={
+            'objectId': ','.join([obj for obj in oids if 'ZTF' in obj]),
+            'columns': 'd:lc_features_g,d:lc_features_r,i:objectId',
+            'output-format': 'json'
+        }
+    )
+    if r.status_code != 200:
+        print(oids)
+        print(','.join([obj for obj in oids if 'ZTF' in obj]))
+        print(r.text)
+        return {key: pd.DataFrame() for key in FILTER_BASE}
+    else:
+        print('Fink API: 200')
+    pdf = pd.read_json(io.BytesIO(r.content))
+    if pdf.empty:
+        raise Exception(f'Fink did not return any data. Most likely something is wrong: {positive}, {negative}')
+    for col in ['d:lc_features_g', 'd:lc_features_r']:
+        pdf[col] = pdf[col].apply(lambda x: json.loads(x))
+    feature_names = FEATURES_COLS
+    pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]')]
+    feature_columns = ['d:lc_features_g', 'd:lc_features_r']
+    common_rems = []
+    result = dict()
+    for section in feature_columns:
+        pdf[feature_names] = pdf[section].to_list()
+        pdf_gf = pdf.drop(feature_columns, axis=1).rename(columns={'i:objectId': 'object_id'})
+        pdf_gf = pdf_gf.reindex(sorted(pdf_gf.columns), axis=1)
+        pdf_gf.drop(common_rems, axis=1, inplace=True)
+        pdf_gf['class'] = pdf_gf['object_id'].apply(lambda x: Label.A if x in good_reactions else Label.R)
+        pdf_gf.dropna(inplace=True)
+        pdf_gf.drop_duplicates(subset=['object_id'], inplace=True)
+        pdf_gf.drop(['object_id'], axis=1, inplace=True)
+        result[f'_{section[-1]}'] = pdf_gf.copy()
+    return result
+
+def load_reactions(name: str):
+    print(f'Loading for {name}')
+    service_route = f"{os.getenv('MAIN_SERVICE_URL')}/all_users_reactions"
+    print(f'service_route -> {service_route}')
+    resp = requests.get(service_route)
+    print(f'''============
+    {resp.text}
+================''')
+    payload = resp.json()
+    for user_data in payload:
+        if user_data['model_name'] == name:
+            positive = user_data["positive"]
+            negative = user_data["negative"]
+            if len(negative) + len(positive) == 0:
+                return {key: pd.DataFrame() for key in FILTER_BASE}
+            else:
+                return load_base(positive, negative)
+    raise Exception('User not found in anomaly base!')
+
 
 if __name__=='__main__':
     get_reactions()
