@@ -20,7 +20,7 @@ from coniferest.onnx import to_onnx as to_onnx_add
 from coniferest.aadforest import AADForest
 from sklearn.model_selection import train_test_split
 import itertools
-import reactions_reader as reactions_reader
+import fink_anomaly_detection_model.reactions_reader as reactions_reader
 
 
 FILTER_BASE = ('_r', '_g')
