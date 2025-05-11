@@ -47,10 +47,9 @@ async def tg_signals_download(token, api_id, api_hash,
                                     channel_id, reactions_good={128293, 128077}, reactions_bad={128078}):
     id_reacted_good = list()
     id_reacted_bad = list()
-
+    history_result = []
     async with TelegramClient('reactions_session', api_id, api_hash) as client:
         async for message in client.iter_messages(channel_id):
-            history_result = []
             ztf_id = re.findall("ZTF\S*", str(message.message))
             if len(ztf_id) == 0:
                 continue
