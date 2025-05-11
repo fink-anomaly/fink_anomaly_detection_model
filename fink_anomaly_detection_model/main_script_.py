@@ -20,7 +20,11 @@ from coniferest.onnx import to_onnx as to_onnx_add
 from coniferest.aadforest import AADForest
 from sklearn.model_selection import train_test_split
 import itertools
-import fink_anomaly_detection_model.reactions_reader as reactions_reader
+import reactions_reader as reactions_reader
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+# import fink_anomaly_detection_model.reactions_reader as reactions_reader
 
 
 FILTER_BASE = ('_r', '_g')
@@ -201,6 +205,52 @@ def extract_all(data) -> pd.Series:
     return series
 
 
+def compare_distributions(arr1, arr2, name1='Array 1', name2='Array 2', save_dir='distribution_plots'):
+    """
+    Plots and saves comparison of two numerical distributions.
+
+    Parameters:
+    - arr1, arr2: arrays of numbers (list or np.ndarray)
+    - name1, name2: labels for the arrays
+    - save_dir: directory to save output images
+    """
+    # Convert inputs to numpy arrays
+
+    # Create directory if it doesn't exist
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Set style
+    sns.set(style="whitegrid")
+
+    # Histogram + KDE plot
+    plt.figure(figsize=(10, 6))
+    sns.histplot(arr1, kde=False, color='skyblue', label=name1, bins=50, stat='density', alpha=0.6)
+    sns.histplot(arr2, kde=False, color='salmon', label=name2, bins=50, stat='density', alpha=0.6)
+    plt.yscale('log')
+    plt.title('Distribution Comparison')
+    plt.xlabel('Score')
+    plt.ylabel('Density / Frequency')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'distribution_comparison.png'))
+    plt.close()
+
+    # KDE only plot
+    plt.figure(figsize=(10, 6))
+    sns.kdeplot(arr1, color='skyblue', label=name1, linewidth=2)
+    sns.kdeplot(arr2, color='salmon', label=name2, linewidth=2)
+    plt.yscale('log')
+    plt.title('Kernel Density Estimation (KDE)')
+    plt.xlabel('Score')
+    plt.ylabel('Density')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'kde_comparison.png'))
+    plt.close()
+
+    print(f"Plots saved in directory: {os.path.abspath(save_dir)}")
+
+
 def fink_ad_model_train():
     """
     :return: None
@@ -217,6 +267,7 @@ def fink_ad_model_train():
     parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset', default='lc_features_20210617_photometry_corrected.parquet')
     parser.add_argument('-c', help='Contamination is null')
     parser.add_argument('--load_user', type=str, default='', help='Load user from anomaly base')
+    parser.add_argument('--diff', type=bool, default=False, help='Diff with base model')
     args = parser.parse_args()
     train_data_path = args.dataset_dir
     reactions_datasets = None
@@ -225,7 +276,9 @@ def fink_ad_model_train():
         reactions_datasets = reactions_reader.load_reactions(args.load_user)
         name = args.load_user
     else:
-        reactions_reader.get_reactions()
+        pass
+        name = ''
+        # reactions_reader.get_reactions()
     assert os.path.exists(train_data_path), 'The specified training dataset file does not exist!'
     filter_base = ('_r', '_g')
     print('Loading training data...')
@@ -291,12 +344,15 @@ def fink_ad_model_train():
         item.mean().to_csv(f'{key}_means.csv')
     print('Training...')
     result_models_IO = []
+    if name:
+        name = '_' + name
     for key in filter_base:
         initial_type = [('X', FloatTensorType([None, data[key].shape[1]]))]
         if reactions_datasets is not None:
             reactions_dataset = reactions_datasets[key]
         else:
             reactions_dataset = pd.read_csv(f'reactions{key}.csv')
+        print(f'Размер полученного датасета: {reactions_dataset.shape}')
         reactions = reactions_dataset['class'].values
         reactions_dataset.drop(['class'], inplace=True, axis=1)
         forest_simp = AADForest(
@@ -311,14 +367,28 @@ def fink_ad_model_train():
             known_data=reactions_dataset.values.copy(order='C'),
             known_labels=reactions.copy(order='C')
         )
+        if args.diff:
+            base_forest = AADForest(
+                n_trees=150,
+                n_subsamples=int(0.5*len(data[key])),
+                tau=0.97,
+                C_a=1.0,
+                n_jobs=1,
+                random_seed=42
+            ).fit(data[key].values.copy(order='C'))
+            learned_model_score = forest_simp.score_samples(data[key].values.copy(order='C'))
+            base_model_score = base_forest.score_samples(data[key].values.copy(order='C'))
+
+            compare_distributions(learned_model_score, base_model_score, name1=f'Model with {reactions_dataset.shape[0]} reactions (Emille model)', name2='Base model')
+
         onx = to_onnx_add(forest_simp, initial_types=initial_type)
         result_models_IO.append(onx.SerializeToString())
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        zip_file.writestr(f'forest{FILTER_BASE[0]}_AAD_{name}.onnx', result_models_IO[0])
-        zip_file.writestr(f'forest{FILTER_BASE[1]}_AAD_{name}.onnx', result_models_IO[1])
+        zip_file.writestr(f'forest{FILTER_BASE[0]}_AAD{name}.onnx', result_models_IO[0])
+        zip_file.writestr(f'forest{FILTER_BASE[1]}_AAD{name}.onnx', result_models_IO[1])
     zip_buffer.seek(0)
-    with open(f'anomaly_detection_forest_AAD_{name}.zip', 'wb') as f:
+    with open(f'anomaly_detection_forest_AAD{name}.zip', 'wb') as f:
         f.write(zip_buffer.getvalue())
 
 

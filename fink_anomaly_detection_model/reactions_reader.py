@@ -50,6 +50,7 @@ async def tg_signals_download(token, api_id, api_hash,
 
     async with TelegramClient('reactions_session', api_id, api_hash) as client:
         async for message in client.iter_messages(channel_id):
+            history_result = []
             ztf_id = re.findall("ZTF\S*", str(message.message))
             if len(ztf_id) == 0:
                 continue
@@ -74,9 +75,15 @@ async def tg_signals_download(token, api_id, api_hash,
                 if bad_counter >= good_counter:
                     id_reacted_bad.append(ztf_id)
                     print(f'{ztf_id}->BAD')
+                    history_result.append(False)
                 else:
                     id_reacted_good.append(ztf_id)
                     print(f'{ztf_id}->GOOD')
+                    history_result.append(True)
+            else:
+                history_result.append(False)
+    with open('history_list.json', 'w') as f:
+        json.dump(history_result, f)
     return set(id_reacted_good), set(id_reacted_bad)
 
 
@@ -159,7 +166,7 @@ def get_reactions():
     for col in ['d:lc_features_g', 'd:lc_features_r']:
         pdf[col] = pdf[col].apply(lambda x: json.loads(x))
     feature_names = FEATURES_COLS
-    pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]')]
+    pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]') &  ~(pdf['d:lc_features_r'].astype(str).isin('NaN') )]
     feature_columns = ['d:lc_features_g', 'd:lc_features_r']
     common_rems = [
         # 'percent_amplitude',
@@ -206,11 +213,14 @@ def load_base(positive: List[str], negative: List[str]):
     pdf = pd.read_json(io.BytesIO(r.content))
     if pdf.empty:
         raise Exception(f'Fink did not return any data. Most likely something is wrong: {positive}, {negative}')
+    print(pdf.columns)
+    real_ids = set([obj for obj in oids if 'ZTF' in obj])
     for col in ['d:lc_features_g', 'd:lc_features_r']:
         pdf[col] = pdf[col].apply(lambda x: json.loads(x))
     feature_names = FEATURES_COLS
-    pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]')]
+    pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]') & (~pdf['d:lc_features_r'].str.contains('NaN', na=False))]
     feature_columns = ['d:lc_features_g', 'd:lc_features_r']
+    print(pdf.shape)
     common_rems = []
     result = dict()
     for section in feature_columns:
@@ -221,6 +231,10 @@ def load_base(positive: List[str], negative: List[str]):
         pdf_gf['class'] = pdf_gf['object_id'].apply(lambda x: Label.A if x in good_reactions else Label.R)
         pdf_gf.dropna(inplace=True)
         pdf_gf.drop_duplicates(subset=['object_id'], inplace=True)
+        rec_ids = set(pdf_gf['object_id'].to_list())
+        diff = real_ids.difference(rec_ids)
+        if diff:
+            print(f'Features not found: {diff}')
         pdf_gf.drop(['object_id'], axis=1, inplace=True)
         result[f'_{section[-1]}'] = pdf_gf.copy()
     return result
@@ -238,6 +252,7 @@ def load_reactions(name: str):
         if user_data['model_name'] == name:
             positive = user_data["positive"]
             negative = user_data["negative"]
+            print(f'Получено {len(negative) + len(positive)} реакций')
             if len(negative) + len(positive) == 0:
                 return {key: pd.DataFrame() for key in FILTER_BASE}
             else:

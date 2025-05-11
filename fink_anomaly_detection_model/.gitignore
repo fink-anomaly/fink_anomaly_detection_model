@@ -7,3 +7,4 @@ lc_features*
 !*.py
 *.onnx
 *.parquet
+*.zip
