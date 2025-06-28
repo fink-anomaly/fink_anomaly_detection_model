@@ -1,4 +1,3 @@
-import pickle
 import os.path
 import argparse
 from collections import defaultdict
@@ -7,6 +6,7 @@ from random import randint, choice
 import pandas as pd
 import psutil
 import os
+from fink_science.ad_features.processor import FEATURES_COLS
 import time
 import io, zipfile
 from tqdm import tqdm
@@ -14,20 +14,78 @@ from sklearn.ensemble import IsolationForest
 from sklearn.metrics import make_scorer
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import roc_auc_score
-from skl2onnx import to_onnx
 from skl2onnx.common.data_types import FloatTensorType
 from coniferest.onnx import to_onnx as to_onnx_add
-from coniferest.aadforest import AADForest
+from coniferest.aadforest import AADForest, Label
 from sklearn.model_selection import train_test_split
+from functools import reduce
 import itertools
-# import reactions_reader as reactions_reader
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-import fink_anomaly_detection_model.reactions_reader as reactions_reader
+from typing import Dict, Any
+import requests
+# import fink_anomaly_detection_model.reactions_reader as reactions_reader
+if __name__=='__main__':
+    import reactions_reader as reactions_reader
+else:
+    import fink_anomaly_detection_model.reactions_reader as reactions_reader
+import optuna
+import json
 
 
 FILTER_BASE = ('_r', '_g')
+
+
+def evaluate_aadforest_params(
+        params: Dict[str, Any],
+        base_data: Dict[str, np.ndarray],
+        known_features: Dict[str, np.ndarray],
+        known_labels: np.ndarray,
+        base_forest: bool = False
+) -> float:
+    anomaly_indices = np.where(known_labels == Label.A)[0]
+
+    if len(anomaly_indices) == 0:
+        raise ValueError("В `known_labels` не найдено ни одной аномалии (Label.A). Валидация невозможна.")
+
+    ranks = []
+    print(f"Начинаю валидацию для {len(anomaly_indices)} аномалий с параметрами: {params}")
+
+    for i, hold_out_idx in enumerate(anomaly_indices):
+        print(f"  -> Обработка аномалии {i + 1}/{len(anomaly_indices)}...")
+        train_indices = np.delete(np.arange(len(known_labels)), hold_out_idx)
+
+        def return_samples_for_key(key):
+            train_known_features = known_features[key]
+            train_known_labels = known_labels
+            test_anomaly_features = known_features[key][hold_out_idx].reshape(1, -1)
+            if base_forest:
+                forest = AADForest(**params).fit(
+                    base_data[key]
+                )
+            else:
+                forest = AADForest(**params).fit_known(
+                    base_data[key],
+                    known_data=train_known_features[train_indices],
+                    known_labels=train_known_labels[train_indices]
+                )
+
+            base_scores = forest.score_samples(base_data[key])
+            hold_out_score = forest.score_samples(test_anomaly_features)[0]
+            return base_scores, hold_out_score
+        base_scores, hold_out_score = reduce(
+            lambda base, cur: (base[0] + cur[0], base[1] + cur[1]), (return_samples_for_key(key) for key in base_data.keys())
+        )
+        rank = np.sum(base_scores >= hold_out_score) + 1
+        ranks.append(rank)
+        print(f'Для неё получен ранк {len(base_scores)-rank}')
+
+    average_rank = np.median(ranks)
+    print(f"Готово. Медианный ранг для данных параметров: {len(base_scores)-average_rank:.2f}\n")
+
+    return len(base_scores)-average_rank
+
 
 
 def generate_param_comb(param_dict):
@@ -35,24 +93,6 @@ def generate_param_comb(param_dict):
     columns = param_dict.keys()
     for obj in base:
         yield dict(zip(columns, obj))
-
-
-def train_base_AAD(data: pd.DataFrame, train_params, scorer, y_true, use_default_model=False):
-    if use_default_model:
-        return AADForest().fit(data.values)
-    X_train, X_test, y_train, y_test = train_test_split(
-        data.values, y_true, test_size=0.2, random_state=42)
-    best_est = (0, None, None)
-    for cur_params in generate_param_comb(train_params):
-        print(cur_params)
-        forest = AADForest(**cur_params)
-        forest.fit(X_train, y_train)
-        cur_score = scorer(forest, X_test, y_test)
-        print(cur_score)
-        if cur_score > best_est[0]:
-            best_est = (cur_score, forest, cur_params)
-    print(f'Optimal: {best_est[2]}')
-    return AADForest(**best_est[2]).fit(data.values, y_true)
 
 
 def extract_one(data, key) -> pd.Series:
@@ -214,12 +254,7 @@ def compare_distributions(arr1, arr2, name1='Array 1', name2='Array 2', save_dir
     - name1, name2: labels for the arrays
     - save_dir: directory to save output images
     """
-    # Convert inputs to numpy arrays
-
-    # Create directory if it doesn't exist
     os.makedirs(save_dir, exist_ok=True)
-
-    # Set style
     sns.set(style="whitegrid")
 
     # Histogram + KDE plot
@@ -250,6 +285,44 @@ def compare_distributions(arr1, arr2, name1='Array 1', name2='Array 2', save_dir
 
     print(f"Plots saved in directory: {os.path.abspath(save_dir)}")
 
+def find_or_download_file(filename, save_dir='.'):
+    file_path = os.path.join(save_dir, filename)
+    if os.path.isfile(file_path):
+        print(f"[INFO] File '{filename}' already exists.")
+        return file_path
+    print(f"[INFO] File '{filename}' not found. Starting download default dataset...")
+    download_url = 'https://file.cosmos.msu.ru/files/base_dataset.parquet'
+    try:
+        # Send a GET request with streaming
+        response = requests.get(download_url, stream=True)
+        response.raise_for_status()  # Check for HTTP errors
+
+        # Get file size from headers
+        total_size = int(response.headers.get('Content-Length', 0))
+        downloaded_size = 0
+        chunk_size = 1024
+        with open(file_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    downloaded_size += len(chunk)
+
+                    # Display progress
+                    if total_size > 0:
+                        progress = (downloaded_size / total_size) * 100
+                        print(f"\r[Download] {progress:.2f}% ({downloaded_size}/{total_size} bytes)", end='', flush=True)
+                    else:
+                        print(f"\r[Download] {downloaded_size} bytes", end='', flush=True)
+
+        print(f"\n[INFO] File successfully downloaded and saved as '{filename}'.")
+        return file_path
+
+    except requests.exceptions.RequestException as e:
+        print(f"\n[ERROR] Error downloading file: {e}")
+        if os.path.exists(file_path):
+            os.remove(file_path)  # Remove incomplete file
+        return None
+
 
 def fink_ad_model_train():
     """
@@ -257,17 +330,29 @@ def fink_ad_model_train():
     The function saves 3 files in the call directory:
         forest_g.onnx - Trained model for filter _g in the format onnx
         forest_r.onnx - Trained model for filter _r in the format onnx
-        forest_g.pickle - Trained model for filter _g in the format pickle
-        forest_r.pickle - Trained model for filter _r in the format pickle
         _g_means.csv - mean values for filter _g
         _r_means.csv - mean values for filter _r
 
     """
+    DEFAULT_PARAMS = {'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 0.1557013280338844,
+                      'random_seed': 42}
     parser = argparse.ArgumentParser(description='Fink AD model training')
     parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset', default='lc_features_20210617_photometry_corrected.parquet')
-    parser.add_argument('-c', help='Contamination is null')
     parser.add_argument('--load_user', type=str, default='', help='Load user from anomaly base')
     parser.add_argument('--diff', type=bool, default=False, help='Diff with base model')
+    parser.add_argument('--proba_arg', type=str, default='', help='Experiment ID')
+    parser.add_argument('--plot_sample', type=bool, default=False, help='Plot avg_rank(sample_factor)')
+    parser.add_argument('--plot_c_a', type=bool, default=False, help='Plot avg_rank(C_a)')
+    parser.add_argument('--plot_tau', type=bool, default=False, help='Plot avg_rank(tau)')
+    parser.add_argument('--optuna_steps', type=int, default=35, help='Number of optuna optimization steps')
+    parser.add_argument('--optuna_jobs', type=int, default=4, help='Number of optuna workers')
+    parser.add_argument('--C_a_range', type=float, nargs=2, default=(1, 100),
+                        help='C_a range for plot')
+    parser.add_argument('--tau_range', type=float, nargs=2, default=(0.1, 1),
+                        help='Tau range for plot')
+    parser.add_argument('--sample_range', type=int, nargs=2, default=(0, 30),
+                        help='Sample factor range for plot')
+
     args = parser.parse_args()
     train_data_path = args.dataset_dir
     reactions_datasets = None
@@ -282,7 +367,7 @@ def fink_ad_model_train():
     assert os.path.exists(train_data_path), 'The specified training dataset file does not exist!'
     filter_base = ('_r', '_g')
     print('Loading training data...')
-    x_buf_data = pd.read_parquet(train_data_path)
+    x_buf_data = pd.read_parquet(find_or_download_file(train_data_path))
     print(f'data shape: {x_buf_data.shape}')
     if "lc_features_r" not in x_buf_data.columns:
         features_1 = x_buf_data["lc_features"].apply(lambda data:
@@ -303,7 +388,7 @@ def fink_ad_model_train():
     features_2,
     ], axis=1).dropna(axis=0)
     datasets = defaultdict(lambda: defaultdict(list))
-
+    IS_OPTUNED = False
     with tqdm(total=len(data)) as pbar:
         for _, row in data.iterrows():
             for passband in filter_base:
@@ -329,60 +414,215 @@ def fink_ad_model_train():
     data = {key : main_data[key] for key in filter_base}
     assert data['_r'].shape[1] == data['_g'].shape[1], '''Mismatch of the dimensions of r/g!'''
     common_rems = [
-        'percent_amplitude',
-        'linear_fit_reduced_chi2',
-        'inter_percentile_range_10',
-        'mean_variance',
-        'linear_trend',
-        'standard_deviation',
-        'weighted_mean',
-        'mean'
+        # 'percent_amplitude',
+        # 'linear_fit_reduced_chi2',
+        # 'inter_percentile_range_10',
+        # 'mean_variance',
+        # 'linear_trend',
+        # 'standard_deviation',
+        # 'weighted_mean',
+        # 'mean'
     ]
     data = {key : item.drop(labels=['object_id', 'class'] + common_rems,
                 axis=1) for key, item in data.items()}
+    first_key = next(iter(data))
+    print(f'Используемые фичи: {data[first_key].columns}')
     for key, item in data.items():
         item.mean().to_csv(f'{key}_means.csv')
+    data = {
+        key : value.values.copy(order='C') for key, value in data.items()
+    }
     print('Training...')
     result_models_IO = []
+    target_result = None
+    base_result = None
     if name:
         name = '_' + name
+    filter_counter = 0
     for key in filter_base:
         initial_type = [('X', FloatTensorType([None, data[key].shape[1]]))]
-        if reactions_datasets is not None:
-            reactions_dataset = reactions_datasets[key]
+        if reactions_datasets is None:
+            reactions_datasets = {key : pd.read_csv(f'reactions{key}.csv') for key in filter_base}
+        reactions_shapes = [dataset.shape for dataset in reactions_datasets.values()]
+        print(f'Размер полученного датасета: {reactions_shapes}')
+        if filter_counter == 0 and not all(reactions_dataset.shape[0] == 0 for reactions_dataset in reactions_datasets.values()):
+            first_key = next(iter(reactions_datasets))
+            reactions = reactions_datasets[first_key]['class'].values
+            reactions_datasets = {
+                key: dataset.drop(['class'], axis=1).values.copy(order='C') for key, dataset in reactions_datasets.items()
+            }
         else:
-            reactions_dataset = pd.read_csv(f'reactions{key}.csv')
-        print(f'Размер полученного датасета: {reactions_dataset.shape}')
-        reactions = reactions_dataset['class'].values
-        reactions_dataset.drop(['class'], inplace=True, axis=1)
-        forest_simp = AADForest(
-            n_trees=150,
-            n_subsamples=int(0.5*len(data[key])),
-            tau=0.97,
-            C_a=1.0,
-            n_jobs=1,
-            random_seed=42
-        ).fit_known(
-            data[key].values.copy(order='C'),
-            known_data=reactions_dataset.values.copy(order='C'),
-            known_labels=reactions.copy(order='C')
-        )
+            reactions = np.array([])
+
+        if args.plot_sample:
+            left, right = args.sample_range
+            sample_factors = list(range(left, right, 1))
+            result = []
+            for sample_factor in sample_factors:
+                anomaly_indices = np.where(reactions == Label.A)[0]
+                an_features, an_reactions = {key: dataset[anomaly_indices] for key, dataset in reactions_datasets.items()}, reactions[anomaly_indices]
+                nonan_features, nonan_reactions = {key: dataset[np.where(reactions != Label.A)[0]] for key, dataset in reactions_datasets.items()}, reactions[reactions != Label.A]
+                nonan_count = sample_factor * len(an_reactions)
+                print(nonan_count)
+                if sample_factor > 0:
+                    all_features, all_reactions = {key: np.vstack((an_features[key], nonan_features[key][:nonan_count])).copy(order='C') for key in data.keys()}, np.hstack((an_reactions, nonan_reactions[:nonan_count]))
+                elif sample_factor == 0:
+                    all_features, all_reactions = an_features, an_reactions
+                else:
+                    all_features, all_reactions = {key: np.vstack((an_features[key], nonan_features[key][:nonan_count])).copy(order='C') for key in data.keys()}, np.hstack((an_reactions, nonan_reactions[:nonan_count]))
+                params = DEFAULT_PARAMS
+                result.append(
+                    evaluate_aadforest_params(
+                        params=params,
+                        base_data=data,
+                        known_features=all_features,
+                        known_labels=all_reactions.copy(order='C'),
+                        base_forest=sample_factor==-1
+                    )
+                )
+            plt.plot(sample_factors, result, marker='o')
+            plt.xlabel("Sample factor")
+            plt.ylabel("Median anomaly rank")
+            plt.grid(True)
+            plt.savefig('plot_sample.png')
+        if args.plot_c_a:
+            left, right = args.C_a_range
+            c_a_factors = list(range(int(left), int(right), 10))
+            result = []
+            for c_a_factor in c_a_factors:
+                params = DEFAULT_PARAMS
+                params['C_a'] = c_a_factor
+                result.append(
+                    evaluate_aadforest_params(
+                        params=params,
+                        base_data=data,
+                        known_features=reactions_datasets,
+                        known_labels=reactions.copy(order='C')
+                    )
+                )
+            plt.plot(c_a_factors, result, marker='o')
+            plt.xlabel("C_a factor")
+            plt.ylabel("Median anomaly rank")
+            plt.grid(True)
+            plt.savefig('plot_c_a.png')
+        if args.plot_tau:
+            left, right = args.tau_range
+            tau_factors = np.arange(left, right, 0.1).tolist()
+            result = []
+            for tau_factor in tau_factors:
+                params = DEFAULT_PARAMS
+                params['tau'] = tau_factor
+                result.append(
+                    evaluate_aadforest_params(
+                        params=params,
+                        base_data=data,
+                        known_features=reactions_datasets,
+                        known_labels=reactions.copy(order='C')
+                    )
+                )
+            plt.plot(tau_factors, result, marker='o')
+            plt.xlabel("Tau factor")
+            plt.ylabel("Median anomaly rank")
+            plt.grid(True)
+            plt.savefig('plot_tau.png')
+
+
+        if Label.A in reactions and args.optuna_steps > 0 and not IS_OPTUNED:
+            def objective(trial):
+                params = {
+                    'n_trees': trial.suggest_int('n_trees', 50, 500),
+                    'n_subsamples': trial.suggest_int('n_subsamples', 128, int(0.8 * len(data[key]))),
+                    'C_a': trial.suggest_float('C_a', 1, max(1.1, len(reactions)/np.sum(reactions == Label.A)), log=True),
+                    'tau': trial.suggest_float('tau', min([0.5, 100/(2*len(reactions))]), 0.95),
+                    'n_jobs': None,
+                    'random_seed': 42
+                }
+                avg_rank = evaluate_aadforest_params(
+                        params=params,
+                        base_data=data,
+                        known_features=reactions_datasets,
+                        known_labels=reactions.copy(order='C')
+                    )
+                return avg_rank
+            study = optuna.create_study(direction='minimize')
+            study.optimize(objective, n_trials=args.optuna_steps, n_jobs=args.optuna_jobs)
+
+            print("Optuna:")
+            print(study.best_params)
+            DEFAULT_PARAMS = study.best_params
+            DEFAULT_PARAMS['random_seed'] = 42
+            IS_OPTUNED = True
+            print("(min avg_rank):", study.best_value)
+            forest_simp = AADForest(
+                **study.best_params
+            ).fit_known(
+                data[key],
+                known_data=reactions_datasets[key],
+                known_labels=reactions.copy(order='C')
+            )
+        else:
+            forest_simp = AADForest(
+                **DEFAULT_PARAMS
+            ).fit_known(
+                data[key],
+                known_data=reactions_datasets[key],
+                known_labels=reactions.copy(order='C')
+            )
         if args.diff:
             base_forest = AADForest(
-                n_trees=150,
-                n_subsamples=int(0.5*len(data[key])),
-                tau=0.97,
-                C_a=1.0,
-                n_jobs=1,
-                random_seed=42
-            ).fit(data[key].values.copy(order='C'))
-            learned_model_score = forest_simp.score_samples(data[key].values.copy(order='C'))
-            base_model_score = base_forest.score_samples(data[key].values.copy(order='C'))
+                **DEFAULT_PARAMS
+            ).fit(data[key])
+            learned_model_score = forest_simp.score_samples(data[key])
+            base_model_score = base_forest.score_samples(data[key])
+            compare_distributions(learned_model_score, base_model_score, name1=f'Model with {reactions_datasets[key].shape[0]} reactions', name2='Base model')
+        if args.proba_arg:
+            pdf = reactions_reader.get_fink_data(
+                    [
+                        args.proba_arg
+                    ]
+                )
+            pdf = reactions_reader.select_best_row_per_object(pdf)
+            for col in ['d:lc_features_g', 'd:lc_features_r']:
+                pdf[col] = pdf[col].apply(lambda x: json.loads(x))
+            feature_names = FEATURES_COLS
+            pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]')]
+            feature_columns = ['d:lc_features_g', 'd:lc_features_r']
+            print(pdf.shape)
+            common_rems = []
+            result = dict()
+            for section in feature_columns:
+                pdf[feature_names] = pdf[section].to_list()
+                pdf_gf = pdf.drop(feature_columns, axis=1).rename(columns={'i:objectId': 'object_id'})
+                pdf_gf = pdf_gf.reindex(sorted(pdf_gf.columns), axis=1)
+                pdf_gf.drop(common_rems, axis=1, inplace=True)
+                pdf_gf.drop(['object_id'], axis=1, inplace=True)
+                result[f'_{section[-1]}'] = pdf_gf.copy()
+            base_forest = AADForest(
+                **DEFAULT_PARAMS
+            ).fit(data[key])
 
-            compare_distributions(learned_model_score, base_model_score, name1=f'Model with {reactions_dataset.shape[0]} reactions (Emille model)', name2='Base model')
+            base_model_base = base_forest.score_samples(data[key])
+            base_model_target = base_forest.score_samples(result[key].values.copy(order='C'))
+            base_model_score = forest_simp.score_samples(data[key])
+            target_model_score = forest_simp.score_samples(result[key].values.copy(order='C'))
+            print(f'Предсказан скор: {target_model_score}')
+            if target_result is None:
+                target_result = (base_model_score, target_model_score[0])
+                base_result = (base_model_base, base_model_target[0])
+            else:
+                target_result = (base_model_score + target_result[0], target_result[1] + target_model_score[0])
+                base_result = (base_model_base + base_result[0], base_result[1] + base_model_target[0])
 
         onx = to_onnx_add(forest_simp, initial_types=initial_type)
         result_models_IO.append(onx.SerializeToString())
+        filter_counter += 1
+    if args.proba_arg:
+        sorted_data = np.sort(target_result[0])
+        index = np.searchsorted(sorted_data, target_result[1]) + 1
+        print(f'Model {name}, position for {args.proba_arg} is {index} from {len(sorted_data)} (model with reactions)')
+        sorted_data = np.sort(base_result[0])
+        index = np.searchsorted(sorted_data, base_result[1]) + 1
+        print(f'Model {name}, position for {args.proba_arg} is {index} from {len(sorted_data)} (model without reactions)')
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.writestr(f'forest{FILTER_BASE[0]}_AAD{name}.onnx', result_models_IO[0])
