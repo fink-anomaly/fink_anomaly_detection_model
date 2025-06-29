@@ -329,7 +329,6 @@ def get_fink_data(oids):
 
     all_data = []  # Store results from each request
 
-    # Process in chunks of 100
     for chunk in chunks(filtered_oids, 50):
         payload = {
             'objectId': ','.join(chunk),
@@ -447,6 +446,7 @@ def get_reactions():
     good_reactions = tg_good_reactions.union({})
     bad_reactions = tg_bad_reactions.union({})
     oids = list(good_reactions.union(bad_reactions))
+    print(f'All {len(oids)} reactions')
     print(oids)
     debug_data = [obj for obj in oids if 'ZTF' in obj]
     pdf = get_fink_data(debug_data)
@@ -456,14 +456,14 @@ def get_reactions():
     pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]')]
     feature_columns = ['d:lc_features_g', 'd:lc_features_r']
     common_rems = [
-        'percent_amplitude',
-        'linear_fit_reduced_chi2',
-        'inter_percentile_range_10',
-        'mean_variance',
-        'linear_trend',
-        'standard_deviation',
-        'weighted_mean',
-        'mean'
+        # 'percent_amplitude',
+        # 'linear_fit_reduced_chi2',
+        # 'inter_percentile_range_10',
+        # 'mean_variance',
+        # 'linear_trend',
+        # 'standard_deviation',
+        # 'weighted_mean',
+        # 'mean'
     ]
     pdf = select_best_row_per_object(pdf)
     for section in feature_columns:
@@ -479,6 +479,7 @@ def get_reactions():
 
 def load_base(positive: List[str], negative: List[str]):
     print('Getting current reactions...')
+    print(f'All {len(positive) + len(negative)} reactions')
     good_reactions = set(positive)
     bad_reactions = set(negative)
     oids = list(good_reactions.union(bad_reactions))

@@ -344,7 +344,7 @@ def fink_ad_model_train():
     parser.add_argument('--plot_sample', type=bool, default=False, help='Plot avg_rank(sample_factor)')
     parser.add_argument('--plot_c_a', type=bool, default=False, help='Plot avg_rank(C_a)')
     parser.add_argument('--plot_tau', type=bool, default=False, help='Plot avg_rank(tau)')
-    parser.add_argument('--optuna_steps', type=int, default=35, help='Number of optuna optimization steps')
+    parser.add_argument('--optuna_steps', type=int, default=15, help='Number of optuna optimization steps')
     parser.add_argument('--optuna_jobs', type=int, default=1, help='Number of optuna workers')
     parser.add_argument('--C_a_range', type=float, nargs=2, default=(1, 100),
                         help='C_a range for plot')
@@ -414,14 +414,14 @@ def fink_ad_model_train():
     data = {key : main_data[key] for key in filter_base}
     assert data['_r'].shape[1] == data['_g'].shape[1], '''Mismatch of the dimensions of r/g!'''
     common_rems = [
-        # 'percent_amplitude',
-        # 'linear_fit_reduced_chi2',
-        # 'inter_percentile_range_10',
-        # 'mean_variance',
-        # 'linear_trend',
-        # 'standard_deviation',
-        # 'weighted_mean',
-        # 'mean'
+        'percent_amplitude',
+        'linear_fit_reduced_chi2',
+        'inter_percentile_range_10',
+        'mean_variance',
+        'linear_trend',
+        'standard_deviation',
+        'weighted_mean',
+        'mean'
     ]
     data = {key : item.drop(labels=['object_id', 'class'] + common_rems,
                 axis=1) for key, item in data.items()}
@@ -485,6 +485,7 @@ def fink_ad_model_train():
             plt.ylabel("Median anomaly rank")
             plt.grid(True)
             plt.savefig('plot_sample.png')
+            plt.close()
         if args.plot_c_a and filter_counter == 0:
             left, right = args.C_a_range
             c_a_factors = list(range(int(left), int(right), 10))
@@ -505,6 +506,7 @@ def fink_ad_model_train():
             plt.ylabel("Median anomaly rank")
             plt.grid(True)
             plt.savefig('plot_c_a.png')
+            plt.close()
         if args.plot_tau and filter_counter == 0:
             left, right = args.tau_range
             tau_factors = np.arange(left, right, 0.1).tolist()
@@ -525,7 +527,7 @@ def fink_ad_model_train():
             plt.ylabel("Median anomaly rank")
             plt.grid(True)
             plt.savefig('plot_tau.png')
-
+            plt.close()
 
         if Label.A in reactions and args.optuna_steps > 0 and not IS_OPTUNED:
             def objective(trial):
@@ -545,6 +547,13 @@ def fink_ad_model_train():
                     )
                 return avg_rank
             study = optuna.create_study(direction='minimize')
+            study.enqueue_trial(DEFAULT_PARAMS)
+            study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 1, 'tau': 0.1557013280338844,
+                      'random_seed': 42})
+            study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 100/len(reactions),
+                      'random_seed': 42})
+            study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 1, 'tau': 100 / len(reactions),
+                 'random_seed': 42})
             study.optimize(objective, n_trials=args.optuna_steps, n_jobs=args.optuna_jobs)
 
             print("Optuna:")
