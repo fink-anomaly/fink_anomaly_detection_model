@@ -364,10 +364,10 @@ def fink_ad_model_train():
         pass
         name = ''
         # reactions_reader.get_reactions()
+    x_buf_data = pd.read_parquet(find_or_download_file(train_data_path))
     assert os.path.exists(train_data_path), 'The specified training dataset file does not exist!'
     filter_base = ('_r', '_g')
     print('Loading training data...')
-    x_buf_data = pd.read_parquet(find_or_download_file(train_data_path))
     print(f'data shape: {x_buf_data.shape}')
     if "lc_features_r" not in x_buf_data.columns:
         features_1 = x_buf_data["lc_features"].apply(lambda data:
