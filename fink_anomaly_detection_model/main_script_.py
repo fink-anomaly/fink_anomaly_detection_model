@@ -345,7 +345,7 @@ def fink_ad_model_train():
     parser.add_argument('--plot_c_a', type=bool, default=False, help='Plot avg_rank(C_a)')
     parser.add_argument('--plot_tau', type=bool, default=False, help='Plot avg_rank(tau)')
     parser.add_argument('--optuna_steps', type=int, default=35, help='Number of optuna optimization steps')
-    parser.add_argument('--optuna_jobs', type=int, default=4, help='Number of optuna workers')
+    parser.add_argument('--optuna_jobs', type=int, default=1, help='Number of optuna workers')
     parser.add_argument('--C_a_range', type=float, nargs=2, default=(1, 100),
                         help='C_a range for plot')
     parser.add_argument('--tau_range', type=float, nargs=2, default=(0.1, 1),
