@@ -512,7 +512,7 @@ def load_base(positive: List[str], negative: List[str]):
 
 def load_reactions(name: str):
     print(f'Loading for {name}')
-    service_route = f"{os.getenv('MAIN_SERVICE_URL')}/all_users_reactions"
+    service_route = f"https://anomaly.fink-broker.org/all_users_reactions"
     print(f'service_route -> {service_route}')
     resp = requests.get(service_route)
     payload = resp.json()
