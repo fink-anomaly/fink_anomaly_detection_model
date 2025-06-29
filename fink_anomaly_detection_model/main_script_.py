@@ -350,7 +350,7 @@ def fink_ad_model_train():
                         help='C_a range for plot')
     parser.add_argument('--tau_range', type=float, nargs=2, default=(0.1, 1),
                         help='Tau range for plot')
-    parser.add_argument('--sample_range', type=int, nargs=2, default=(0, 30),
+    parser.add_argument('--sample_range', type=int, nargs=2, default=(-1, 30),
                         help='Sample factor range for plot')
 
     args = parser.parse_args()
@@ -454,7 +454,7 @@ def fink_ad_model_train():
         else:
             reactions = np.array([])
 
-        if args.plot_sample:
+        if args.plot_sample and filter_counter == 0:
             left, right = args.sample_range
             sample_factors = list(range(left, right, 1))
             result = []
@@ -485,7 +485,7 @@ def fink_ad_model_train():
             plt.ylabel("Median anomaly rank")
             plt.grid(True)
             plt.savefig('plot_sample.png')
-        if args.plot_c_a:
+        if args.plot_c_a and filter_counter == 0:
             left, right = args.C_a_range
             c_a_factors = list(range(int(left), int(right), 10))
             result = []
@@ -505,7 +505,7 @@ def fink_ad_model_train():
             plt.ylabel("Median anomaly rank")
             plt.grid(True)
             plt.savefig('plot_c_a.png')
-        if args.plot_tau:
+        if args.plot_tau and filter_counter == 0:
             left, right = args.tau_range
             tau_factors = np.arange(left, right, 0.1).tolist()
             result = []
