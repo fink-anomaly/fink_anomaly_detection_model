@@ -12,7 +12,7 @@ setup(name='fink_anomaly_detection_model',
       packages=find_packages(),
       author_email='timofei.psheno@gmail.com',
       install_requires=['scikit-learn>=1.3.1', 'numpy==1.26.4', 'pandas==2.0.2',
-      'tqdm>=4.65.0', 'onnx>=1.14.0', 'scipy>=1.10.1', 'onnx==1.16.1'
+      'tqdm>=4.65.0', 'onnx>=1.14.0', 'scipy>=1.10.1', 'onnx==1.16.1',
       'skl2onnx>=1.15.0', 'pyarrow>=13.0.0', 'coniferest<=0.0.14', 'telethon',
       'slack_sdk', 'config', 'configparser', 'fink_science==3.13.3', 'pyspark==3.1.3', 'light_curve', 'psutil', 'seaborn==0.13.2', 'matplotlib==3.9.0', 'optuna', 'requests'],
       entry_points={
