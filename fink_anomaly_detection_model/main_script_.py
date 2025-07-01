@@ -334,8 +334,7 @@ def fink_ad_model_train():
         _r_means.csv - mean values for filter _r
 
     """
-    DEFAULT_PARAMS = {'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 0.1557013280338844,
-                      'random_seed': 42}
+    DEFAULT_PARAMS = {'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 0.9998266236693366, 'n_jobs': None, 'random_seed': 42}
     parser = argparse.ArgumentParser(description='Fink AD model training')
     parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset', default='lc_features_20210617_photometry_corrected.parquet')
     parser.add_argument('--load_user', type=str, default='', help='Load user from anomaly base')
@@ -447,15 +446,16 @@ def fink_ad_model_train():
             reactions_datasets = {key : pd.read_csv(f'reactions{key}.csv') for key in filter_base}
         reactions_shapes = [dataset.shape for dataset in reactions_datasets.values()]
         print(f'Размер полученного датасета: {reactions_shapes}')
-        if filter_counter == 0 and not all(reactions_dataset.shape[0] == 0 for reactions_dataset in reactions_datasets.values()):
-            first_key = next(iter(reactions_datasets))
-            reactions = reactions_datasets[first_key]['class'].values
-            reactions_datasets = {
-                key: dataset.drop(['class'], axis=1).values.copy(order='C') for key, dataset in reactions_datasets.items()
-            }
+        if not all(reactions_dataset.shape[0] == 0 for reactions_dataset in reactions_datasets.values()):
+            if filter_counter == 0:
+                first_key = next(iter(reactions_datasets))
+                reactions = reactions_datasets[first_key]['class'].values
+                reactions_datasets = {
+                    key: dataset.drop(['class'], axis=1).values.copy(order='C') for key, dataset in reactions_datasets.items()
+                }
         else:
             reactions = np.array([])
-
+        print(f'Filter {key}, {len(reactions)} reactions')
         if args.plot_sample and filter_counter == 0:
             left, right = args.sample_range
             sample_factors = list(range(left, right, 1))
@@ -550,16 +550,6 @@ def fink_ad_model_train():
                 return avg_rank
             study = optuna.create_study(direction='minimize')
             study.enqueue_trial(DEFAULT_PARAMS)
-            study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 100/len(reactions),
-                      'random_seed': 42})
-            study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 10/(len(data[key])),
-                                 'random_seed': 42})
-            study.enqueue_trial(
-                {'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 1 - 100 / len(reactions),
-                 'random_seed': 42})
-            study.enqueue_trial(
-                {'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 1 - 10 / (len(data[key])),
-                 'random_seed': 42})
             study.optimize(objective, n_trials=args.optuna_steps, n_jobs=args.optuna_jobs)
 
             print("Optuna:")
