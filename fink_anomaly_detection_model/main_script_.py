@@ -245,6 +245,14 @@ def extract_all(data) -> pd.Series:
     return series
 
 
+def process_matrices(matrix1, matrix2):
+    mask = ~np.isnan(matrix1).any(axis=1)
+    cleaned_matrix1 = matrix1[mask]
+    mean_values = np.nanmean(cleaned_matrix1, axis=0)
+    matrix2_filled = np.where(np.isnan(matrix2), mean_values, matrix2)
+    return matrix2_filled
+
+
 def compare_distributions(arr1, arr2, name1='Array 1', name2='Array 2', save_dir='distribution_plots'):
     """
     Plots and saves comparison of two numerical distributions.
@@ -370,6 +378,7 @@ def fink_ad_model_train():
     filter_base = ('_r', '_g')
     print('Loading training data...')
     print(f'data shape: {x_buf_data.shape}')
+
     if "lc_features_r" not in x_buf_data.columns:
         features_1 = x_buf_data["lc_features"].apply(lambda data:
             extract_one(data, "1")).add_suffix("_r")
@@ -451,7 +460,7 @@ def fink_ad_model_train():
                 first_key = next(iter(reactions_datasets))
                 reactions = reactions_datasets[first_key]['class'].values
                 reactions_datasets = {
-                    key: dataset.drop(['class'], axis=1).values.copy(order='C') for key, dataset in reactions_datasets.items()
+                    key: process_matrices(data[key], dataset.drop(['class'], axis=1).values).copy(order='C') for key, dataset in reactions_datasets.items()
                 }
         else:
             reactions = np.array([])
