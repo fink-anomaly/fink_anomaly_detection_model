@@ -245,11 +245,15 @@ def extract_all(data) -> pd.Series:
     return series
 
 
+
 def process_matrices(matrix1, matrix2):
     mask = ~np.isnan(matrix1).any(axis=1)
     cleaned_matrix1 = matrix1[mask]
     mean_values = np.nanmean(cleaned_matrix1, axis=0)
+    nan_rows_in_matrix2 = np.isnan(matrix2).any(axis=1)
+    count_nan_rows = np.sum(nan_rows_in_matrix2)
     matrix2_filled = np.where(np.isnan(matrix2), mean_values, matrix2)
+    print(f"The number of lines in which NaN has been replaced: {count_nan_rows}")
     return matrix2_filled
 
 
@@ -460,7 +464,7 @@ def fink_ad_model_train():
                 first_key = next(iter(reactions_datasets))
                 reactions = reactions_datasets[first_key]['class'].values
                 reactions_datasets = {
-                    key: process_matrices(data[key], dataset.drop(['class'], axis=1).values).copy(order='C') for key, dataset in reactions_datasets.items()
+                    key: process_matrices(data[key], dataset.drop(['class'] + common_rems, axis=1).values).copy(order='C') for key, dataset in reactions_datasets.items()
                 }
         else:
             reactions = np.array([])
