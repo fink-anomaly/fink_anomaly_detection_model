@@ -352,13 +352,15 @@ def fink_ad_model_train():
                         help='Tau range for plot')
     parser.add_argument('--sample_range', type=int, nargs=2, default=(-1, 30),
                         help='Sample factor range for plot')
+    parser.add_argument('--chunk_limit', type=int, default=25,
+                        help='The maximum number of objects that can be requested from Fink at a time')
 
     args = parser.parse_args()
     train_data_path = args.dataset_dir
     reactions_datasets = None
     name = None
     if args.load_user:
-        reactions_datasets = reactions_reader.load_reactions(args.load_user)
+        reactions_datasets = reactions_reader.load_reactions(args.load_user, args.chunk_limit)
         name = args.load_user
     else:
         pass
@@ -535,7 +537,7 @@ def fink_ad_model_train():
                     'n_trees': trial.suggest_int('n_trees', 50, 500),
                     'n_subsamples': trial.suggest_int('n_subsamples', 128, int(0.8 * len(data[key]))),
                     'C_a': trial.suggest_float('C_a', 1, max(1.1, len(reactions)/np.sum(reactions == Label.A)), log=True),
-                    'tau': trial.suggest_float('tau', min([0.5, 100/(2*len(reactions))]), 0.95),
+                    'tau': trial.suggest_float('tau', min([0.5, 100/(1.2*len(data[key]))]), 0.95),
                     'n_jobs': None,
                     'random_seed': 42
                 }
@@ -548,12 +550,10 @@ def fink_ad_model_train():
                 return avg_rank
             study = optuna.create_study(direction='minimize')
             study.enqueue_trial(DEFAULT_PARAMS)
-            study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 1, 'tau': 0.1557013280338844,
-                      'random_seed': 42})
             study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 100/len(reactions),
                       'random_seed': 42})
-            study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 1, 'tau': 100 / len(reactions),
-                 'random_seed': 42})
+            study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 10/(len(data[key])),
+                                 'random_seed': 42})
             study.optimize(objective, n_trials=args.optuna_steps, n_jobs=args.optuna_jobs)
 
             print("Optuna:")

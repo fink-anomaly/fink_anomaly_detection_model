@@ -305,7 +305,7 @@ async def slack_signals_download(slack_token, slack_channel):
     return set(id_reacted_good), set(id_reacted_bad)
 
 
-def get_fink_data(oids):
+def get_fink_data(oids, chunk_limit=25):
     """
     Fetches data from Fink API for given object IDs in chunks of 100.
 
@@ -329,7 +329,7 @@ def get_fink_data(oids):
 
     all_data = []  # Store results from each request
 
-    for chunk in chunks(filtered_oids, 50):
+    for chunk in chunks(filtered_oids, chunk_limit):
         payload = {
             'objectId': ','.join(chunk),
             'columns': 'd:lc_features_g,d:lc_features_r,i:objectId',
@@ -477,13 +477,13 @@ def get_reactions():
         pdf_gf.to_csv(f'reactions_{section[-1]}.csv', index=False)
     print('OK')
 
-def load_base(positive: List[str], negative: List[str]):
+def load_base(positive: List[str], negative: List[str], chunk_limit=25):
     print('Getting current reactions...')
     print(f'All {len(positive) + len(negative)} reactions')
     good_reactions = set(positive)
     bad_reactions = set(negative)
     oids = list(good_reactions.union(bad_reactions))
-    pdf = get_fink_data([obj for obj in oids if 'ZTF' in obj])
+    pdf = get_fink_data([obj for obj in oids if 'ZTF' in obj], chunk_limit)
     if pdf.empty:
         raise Exception(f'Fink did not return any data. Most likely something is wrong: {positive}, {negative}')
     print(pdf.columns)
@@ -511,7 +511,7 @@ def load_base(positive: List[str], negative: List[str]):
         result[f'_{section[-1]}'] = pdf_gf.copy()
     return result
 
-def load_reactions(name: str):
+def load_reactions(name: str, chunk_limit=25):
     print(f'Loading for {name}')
     service_route = f"https://anomaly.fink-broker.org/all_users_reactions"
     print(f'service_route -> {service_route}')
@@ -525,7 +525,7 @@ def load_reactions(name: str):
             if len(negative) + len(positive) == 0:
                 return {key: pd.DataFrame() for key in FILTER_BASE}
             else:
-                return load_base(positive, negative)
+                return load_base(positive, negative, chunk_limit)
     raise Exception('User not found in anomaly base!')
 
 
