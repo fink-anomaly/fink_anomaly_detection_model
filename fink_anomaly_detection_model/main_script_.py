@@ -537,7 +537,7 @@ def fink_ad_model_train():
                     'n_trees': trial.suggest_int('n_trees', 50, 500),
                     'n_subsamples': trial.suggest_int('n_subsamples', 128, int(0.8 * len(data[key]))),
                     'C_a': trial.suggest_float('C_a', 1, max(1.1, len(reactions)/np.sum(reactions == Label.A)), log=True),
-                    'tau': trial.suggest_float('tau', min([0.5, 100/(1.2*len(data[key]))]), 0.95),
+                    'tau': trial.suggest_float('tau', min([0.5, 100/(1.2*len(data[key]))]), 1),
                     'n_jobs': None,
                     'random_seed': 42
                 }
@@ -554,6 +554,12 @@ def fink_ad_model_train():
                       'random_seed': 42})
             study.enqueue_trial({'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 10/(len(data[key])),
                                  'random_seed': 42})
+            study.enqueue_trial(
+                {'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 1 - 100 / len(reactions),
+                 'random_seed': 42})
+            study.enqueue_trial(
+                {'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 1 - 10 / (len(data[key])),
+                 'random_seed': 42})
             study.optimize(objective, n_trials=args.optuna_steps, n_jobs=args.optuna_jobs)
 
             print("Optuna:")
