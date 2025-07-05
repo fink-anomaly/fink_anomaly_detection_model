@@ -30,7 +30,6 @@ if __name__=='__main__':
     import reactions_reader as reactions_reader
 else:
     import fink_anomaly_detection_model.reactions_reader as reactions_reader
-import optuna
 import json
 
 
@@ -346,7 +345,6 @@ def fink_ad_model_train():
         _r_means.csv - mean values for filter _r
 
     """
-    DEFAULT_PARAMS = {'n_trees': 116, 'n_subsamples': 37386, 'C_a': 62.721054659555236, 'tau': 0.9998266236693366, 'n_jobs': None, 'random_seed': 42}
     parser = argparse.ArgumentParser(description='Fink AD model training')
     parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset', default='lc_features_20210617_photometry_corrected.parquet')
     parser.add_argument('--load_user', type=str, default='', help='Load user from anomaly base')
@@ -355,8 +353,6 @@ def fink_ad_model_train():
     parser.add_argument('--plot_sample', type=bool, default=False, help='Plot avg_rank(sample_factor)')
     parser.add_argument('--plot_c_a', type=bool, default=False, help='Plot avg_rank(C_a)')
     parser.add_argument('--plot_tau', type=bool, default=False, help='Plot avg_rank(tau)')
-    parser.add_argument('--optuna_steps', type=int, default=15, help='Number of optuna optimization steps')
-    parser.add_argument('--optuna_jobs', type=int, default=1, help='Number of optuna workers')
     parser.add_argument('--C_a_range', type=float, nargs=2, default=(1, 100),
                         help='C_a range for plot')
     parser.add_argument('--tau_range', type=float, nargs=2, default=(0.1, 1),
@@ -402,7 +398,6 @@ def fink_ad_model_train():
     features_2,
     ], axis=1).dropna(axis=0)
     datasets = defaultdict(lambda: defaultdict(list))
-    IS_OPTUNED = False
     with tqdm(total=len(data)) as pbar:
         for _, row in data.iterrows():
             for passband in filter_base:
@@ -414,7 +409,8 @@ def fink_ad_model_train():
                         continue
                     new_data[col[:-2]].append(r_data)
             pbar.update()
-
+    DEFAULT_PARAMS = {'n_trees': 150, 'n_subsamples': int(0.5*len(data)), 'C_a': 1000, 'tau': 1-10/len(data),
+                      'n_jobs': None, 'random_seed': 42}
     main_data = {}
     for passband in datasets:
         new_data = datasets[passband]
@@ -544,48 +540,13 @@ def fink_ad_model_train():
             plt.savefig('plot_tau.png')
             plt.close()
 
-        if Label.A in reactions and args.optuna_steps > 0 and not IS_OPTUNED:
-            def objective(trial):
-                params = {
-                    'n_trees': trial.suggest_int('n_trees', 50, 500),
-                    'n_subsamples': trial.suggest_int('n_subsamples', 128, int(0.8 * len(data[key]))),
-                    'C_a': trial.suggest_float('C_a', 1, max(1.1, len(reactions)/np.sum(reactions == Label.A)), log=True),
-                    'tau': trial.suggest_float('tau', min([0.5, 100/(1.2*len(data[key]))]), 1),
-                    'n_jobs': None,
-                    'random_seed': 42
-                }
-                avg_rank = evaluate_aadforest_params(
-                        params=params,
-                        base_data=data,
-                        known_features=reactions_datasets,
-                        known_labels=reactions.copy(order='C')
-                    )
-                return avg_rank
-            study = optuna.create_study(direction='minimize')
-            study.enqueue_trial(DEFAULT_PARAMS)
-            study.optimize(objective, n_trials=args.optuna_steps, n_jobs=args.optuna_jobs)
-
-            print("Optuna:")
-            print(study.best_params)
-            DEFAULT_PARAMS = study.best_params
-            DEFAULT_PARAMS['random_seed'] = 42
-            IS_OPTUNED = True
-            print("(min avg_rank):", study.best_value)
-            forest_simp = AADForest(
-                **study.best_params
-            ).fit_known(
-                data[key],
-                known_data=reactions_datasets[key],
-                known_labels=reactions.copy(order='C')
-            )
-        else:
-            forest_simp = AADForest(
-                **DEFAULT_PARAMS
-            ).fit_known(
-                data[key],
-                known_data=reactions_datasets[key],
-                known_labels=reactions.copy(order='C')
-            )
+        forest_simp = AADForest(
+            **DEFAULT_PARAMS
+        ).fit_known(
+            data[key],
+            known_data=reactions_datasets[key],
+            known_labels=reactions.copy(order='C')
+        )
         if args.diff:
             base_forest = AADForest(
                 **DEFAULT_PARAMS
