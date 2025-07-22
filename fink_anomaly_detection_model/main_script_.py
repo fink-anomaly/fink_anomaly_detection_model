@@ -7,6 +7,8 @@ import pandas as pd
 import psutil
 import os
 from fink_science.ad_features.processor import FEATURES_COLS
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_curve, auc
 import time
 import io, zipfile
 from tqdm import tqdm
@@ -28,12 +30,375 @@ import requests
 # import fink_anomaly_detection_model.reactions_reader as reactions_reader
 if __name__=='__main__':
     import reactions_reader as reactions_reader
+    import gui_model_validation
 else:
     import fink_anomaly_detection_model.reactions_reader as reactions_reader
+    import fink_anomaly_detection_model.gui_model_validation as gui_model_validation
 import json
 
 
 FILTER_BASE = ('_r', '_g')
+
+
+def plot_leaf_purity_ratio_histogram(
+        params: Dict[str, Any],
+        base_data: Dict[str, np.ndarray],
+        known_features: Dict[str, np.ndarray],
+        known_labels: np.ndarray,
+        bins: int = 100
+):
+    print("Building leaf purity ratio histogram...")
+    sorted_keys = sorted(known_features.keys())
+    concatenated_known_features = np.hstack([known_features[key] for key in sorted_keys])
+    concatenated_base_data = np.hstack(
+        [base_data.get(key, np.zeros((len(concatenated_known_features), 0))) for key in sorted_keys])
+    forest = AADForest(**params).fit_known(
+        concatenated_base_data,
+        known_data=concatenated_known_features,
+        known_labels=known_labels
+    )
+    leaf_indices = forest.apply(concatenated_known_features)
+
+    leaf_stats = defaultdict(lambda: {"anomalies": 0, "normals": 0})
+    n_samples, n_estimators = leaf_indices.shape
+    for i_sample in range(n_samples):
+        label = known_labels[i_sample]
+        for i_tree in range(n_estimators):
+            unique_key = (i_tree, leaf_indices[i_sample, i_tree])
+            if label == Label.A:
+                leaf_stats[unique_key]['anomalies'] += 1
+            else:
+                leaf_stats[unique_key]['normals'] += 1
+
+    total_populated_leaves = len(leaf_stats)
+    print(f"  - Found {total_populated_leaves} unique populated leaves in the forest.")
+
+    ratios = []
+    infinite_ratios_count = 0
+
+    for leaf, counts in leaf_stats.items():
+        n_anomalies = counts['anomalies']
+        n_normals = counts['normals']
+
+        if n_anomalies == 0 and n_normals == 0:
+            continue
+
+        if n_normals == 0:
+            if n_anomalies > 0:
+                infinite_ratios_count += 1
+        else:
+            ratios.append(n_anomalies / n_normals)
+
+    if not ratios and infinite_ratios_count == 0:
+        print("Could not calculate any ratios. No populated leaves found.")
+        return
+
+    plt.figure(figsize=(12, 7))
+    if any(r > 0 for r in ratios):
+        log_bins = np.logspace(np.log10(min(r for r in ratios if r > 0) + 1e-9),
+                               np.log10(max(ratios) + 1),
+                               bins)
+    else:  # Handle case with no positive ratios
+        log_bins = bins
+
+    plt.hist(ratios, bins=log_bins, color='royalblue', label='Leaves with Mixed Samples')
+    # plt.xscale('log')
+
+    plt.title('Distribution of (Anomalies / Normals) Ratio in Leaves', fontsize=16)
+    plt.xlabel('Ratio (Anomalies / Normals) in Leaf')
+    plt.ylabel('Number of Leaves')
+
+    # Add informational text boxes
+    zero_ratio_count = sum(1 for r in ratios if r == 0)
+
+    plt.text(0.05, 0.95, f'Pure "Normal" Leaves (Ratio = 0): {zero_ratio_count}',
+             transform=plt.gca().transAxes, verticalalignment='top',
+             bbox=dict(boxstyle='round,pad=0.5', fc='cornflowerblue', alpha=0.3))
+
+    plt.text(0.05, 0.85, f'Pure "Anomaly" Leaves (Ratio = ∞): {infinite_ratios_count}',
+             transform=plt.gca().transAxes, verticalalignment='top',
+             bbox=dict(boxstyle='round,pad=0.5', fc='darkorange', alpha=0.3))
+
+    plt.text(0.05, 0.75, f'Total Populated Leaves: {total_populated_leaves}',
+             transform=plt.gca().transAxes, verticalalignment='top',
+             bbox=dict(boxstyle='round,pad=0.5', fc='mediumseagreen', alpha=0.3))
+
+    plt.grid(True, which="both", ls="--", alpha=0.5)
+    plt.legend(loc='best')
+    plt.show()
+
+
+def plot_leaf_purity(
+        params: Dict[str, Any],
+        base_data: Dict[str, np.ndarray],
+        known_features: Dict[str, np.ndarray],
+        known_labels: np.ndarray,
+        top_n_leaves: int = 500
+) -> Dict[tuple, Dict[str, int]]:
+    if not known_features:
+        raise ValueError("Словарь `known_features` не может быть пустым.")
+
+    sorted_keys = sorted(known_features.keys())
+    concatenated_known_features = np.hstack([known_features[key] for key in sorted_keys])
+    concatenated_base_data = np.hstack(
+        [base_data.get(key, np.zeros((len(concatenated_known_features), 0))) for key in sorted_keys])
+
+    forest = AADForest(**params).fit_known(
+        concatenated_base_data,
+        known_data=concatenated_known_features,
+        known_labels=known_labels
+    )
+    leaf_indices = forest.apply(concatenated_known_features)
+    leaf_stats = defaultdict(lambda: {"anomalies": 0, "normals": 0, "total": 0})
+    n_samples, n_estimators = leaf_indices.shape
+
+    for i_sample in range(n_samples):
+        label = known_labels[i_sample]
+        for i_tree in range(n_estimators):
+            leaf_id = leaf_indices[i_sample, i_tree]
+            unique_key = (i_tree, leaf_id)
+
+            if label == Label.A:
+                leaf_stats[unique_key]['anomalies'] += 1
+            else:
+                leaf_stats[unique_key]['normals'] += 1
+            leaf_stats[unique_key]['total'] += 1
+
+    populated_leaves = {key: val for key, val in leaf_stats.items() if val['total'] > 0}
+
+    if not populated_leaves:
+        print("Не найдено ни одного населенного листа. График не может быть построен.")
+        return {}
+    sorted_leaves_items = sorted(
+        populated_leaves.items(),
+        key=lambda item: item[1]['total'],  # Сортируем по 'total'
+        reverse=True
+    )
+
+    if top_n_leaves is not None:
+        sorted_leaves_items = sorted_leaves_items[:top_n_leaves]
+
+    x_labels = [f"({key[0]}, {key[1]})" for key, val in sorted_leaves_items]  # (дерево, лист)
+    anomaly_counts = [val['anomalies'] for key, val in sorted_leaves_items]
+    normal_counts = [-val['normals'] for key, val in sorted_leaves_items]
+    x_pos = np.arange(len(x_labels))
+
+    fig, ax = plt.subplots(figsize=(max(15, len(x_labels) * 0.3), 8))
+
+    ax.bar(x_pos, anomaly_counts, color='darkorange', label='Anomalies')
+    ax.bar(x_pos, normal_counts, color='cornflowerblue', label='Normals')
+
+    ax.axhline(0, color='black', linewidth=0.8)
+    ax.set_ylabel('Number of objects in the leaf')
+    ax.set_xlabel('(tree, lv)', fontsize=8)
+    ax.set_title(f'Distribution of anomalies and "non-anomalies" by the most populated leaves', fontsize=16)
+
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(x_labels, rotation=90, fontsize=9)
+
+    ticks = ax.get_yticks()
+    ax.set_yticklabels([int(abs(tick)) for tick in ticks])
+
+    ax.legend()
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
+    plt.show()
+
+    return dict(sorted_leaves_items)
+
+
+def plot_train_test_score_distributions(
+        params: Dict[str, Any],
+        base_data: Dict[str, np.ndarray],
+        known_features: Dict[str, np.ndarray],
+        known_labels: np.ndarray,
+        test_size: float = 0.5,
+        random_state: int = 42,
+        anomaly_percentile: float = 5.0,
+        bins: int = 50
+) -> Dict[str, Any]:
+
+    # 1. Разделение данных на train и test
+    indices = np.arange(len(known_labels))
+    train_indices, test_indices = train_test_split(
+        indices, test_size=test_size, random_state=random_state, stratify=known_labels
+    )
+    y_train = known_labels[train_indices]
+    y_test = known_labels[test_indices]
+
+    train_known_features = {key: val[train_indices] for key, val in known_features.items()}
+    test_known_features = {key: val[test_indices] for key, val in known_features.items()}
+
+    train_scores_list, test_scores_list, base_scores_list = [], [], []
+
+    for key in base_data.keys():
+        forest = AADForest(**params).fit_known(
+            base_data[key], known_data=train_known_features[key], known_labels=y_train
+        )
+        train_scores_list.append(forest.score_samples(train_known_features[key]))
+        test_scores_list.append(forest.score_samples(test_known_features[key]))
+        base_scores_list.append(forest.score_samples(base_data[key]))
+
+    final_train_scores = np.sum(train_scores_list, axis=0)
+    final_test_scores = np.sum(test_scores_list, axis=0)
+    final_base_scores = np.sum(base_scores_list, axis=0)
+    threshold = np.percentile(final_base_scores, anomaly_percentile)
+    scores_anomaly_test = final_test_scores[y_test == Label.A]
+    scores_normal_test = final_test_scores[y_test != Label.A]
+    scores_anomaly_train = final_train_scores[y_train == Label.A]
+    scores_normal_train = final_train_scores[y_train != Label.A]
+    if len(scores_anomaly_test) > 0 and len(scores_normal_test) > 0:
+        plt.figure(figsize=(12, 7))
+        plt.hist(final_base_scores, bins=bins, density=True, color='mediumseagreen', alpha=0.6, label='Base data')
+        plt.hist(scores_normal_test, bins=bins, density=True, color='cornflowerblue', alpha=0.7,
+                 label='(Norm)')
+        plt.hist(scores_anomaly_test, bins=bins, density=True, color='darkorange', alpha=0.8,
+                 label='(Anomaly)')
+        plt.axvline(threshold, color='crimson', linestyle='--', linewidth=2,
+                    label=f'Порог по баз. данным = {threshold:.2f}')
+        plt.title('Распределение скоров на ТЕСТОВОЙ выборке', fontsize=15, fontweight='bold')
+        plt.xlabel('Скоры аномальности', fontsize=12)
+        plt.ylabel('Плотность распределения', fontsize=12)
+        plt.legend()
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.show()
+    else:
+        print("В тестовой выборке отсутствует один из классов. График для теста не построен.")
+
+    # --- График 2: Обучающая выборка ---
+    if len(scores_anomaly_train) > 0 and len(scores_normal_train) > 0:
+        plt.figure(figsize=(12, 7))
+        plt.hist(final_base_scores, bins=bins, density=True, color='mediumseagreen', alpha=0.6, label='Базовые данные')
+        plt.hist(scores_normal_train, bins=bins, density=True, color='cornflowerblue', alpha=0.7,
+                 label='Не аномалии (Norm)')
+        plt.hist(scores_anomaly_train, bins=bins, density=True, color='darkorange', alpha=0.8,
+                 label='Аномалии (Anomaly)')
+        plt.axvline(threshold, color='crimson', linestyle='--', linewidth=2,
+                    label=f'Порог по баз. данным = {threshold:.2f}')
+        plt.title('Распределение скоров на ОБУЧАЮЩЕЙ выборке', fontsize=15, fontweight='bold')
+        plt.xlabel('Скоры аномальности', fontsize=12)
+        plt.ylabel('Плотность распределения', fontsize=12)
+        plt.legend()
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.show()
+    else:
+        print("В обучающей выборке отсутствует один из классов. График для трейна не построен.")
+
+    print("Готово.")
+
+    return {
+        "test_data": {"scores_anomaly": scores_anomaly_test, "scores_normal": scores_normal_test},
+        "train_data": {"scores_anomaly": scores_anomaly_train, "scores_normal": scores_normal_train},
+        "base_scores": final_base_scores,
+        "threshold": threshold
+    }
+
+
+def clean_dict_from_nans_inplace(data_dict: Dict[str, np.ndarray], reactions: np.ndarray) -> Dict[str, np.ndarray]:
+    if not data_dict:
+        print("Входной словарь пуст. Возвращаю как есть.")
+        return {}
+    all_arrays = list(data_dict.values())
+    try:
+        num_rows = all_arrays[0].shape[0]
+        if not all(arr.shape[0] == num_rows for arr in all_arrays):
+            raise ValueError("Массивы в словаре имеют разное количество строк!")
+    except IndexError:
+        raise ValueError("Один из массивов не имеет размерности для определения строк (shape[0]).")
+    rows_with_nan_mask = np.zeros(num_rows, dtype=bool)
+
+    for arr in all_arrays:
+        current_nan_mask = np.isnan(arr).any(axis=1)
+        rows_with_nan_mask = np.logical_or(rows_with_nan_mask, current_nan_mask)
+    keep_mask = ~rows_with_nan_mask
+    original_rows = num_rows
+    kept_rows = np.sum(keep_mask)
+    print(f"Start count: {original_rows}")
+    print(f"Count with NaN: {original_rows - kept_rows}")
+    print(f"Result: {kept_rows}")
+    cleaned_dict = {key: arr[keep_mask] for key, arr in data_dict.items()}
+
+    return cleaned_dict, reactions[keep_mask]
+
+def compare_roc_auc_aad_vs_base(
+        params: Dict[str, Any],
+        base_data: Dict[str, np.ndarray],
+        known_features: Dict[str, np.ndarray],
+        known_labels: np.ndarray,
+        test_size: float = 0.2,
+        random_state: int = 42,
+) -> Dict[str, Dict[str, Any]]:
+
+    indices = np.arange(len(known_labels))
+    train_indices, test_indices = train_test_split(
+        indices,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=known_labels
+    )
+
+    y_train = known_labels[train_indices]
+    y_test = known_labels[test_indices]
+
+    train_known_features = {key: val[train_indices] for key, val in known_features.items()}
+    test_known_features = {key: val[test_indices] for key, val in known_features.items()}
+
+    aad_scores_list = []
+    base_scores_list = []
+
+    for key in base_data.keys():
+        aad_forest = AADForest(**params).fit_known(
+            base_data[key],
+            known_data=train_known_features[key],
+            known_labels=y_train
+        )
+        aad_scores_list.append(aad_forest.score_samples(test_known_features[key]))
+        training_data_for_base_forest = base_data[key]
+
+        base_forest = AADForest(**params).fit(training_data_for_base_forest)
+        base_scores_list.append(base_forest.score_samples(test_known_features[key]))
+
+    final_aad_scores = np.sum(aad_scores_list, axis=0)
+    final_base_scores = np.sum(base_scores_list, axis=0)
+    y_true_binary = (y_test == Label.A).astype(int)
+
+    aad_y_scores_inv = -final_aad_scores
+    base_y_scores_inv = -final_base_scores
+
+    fpr_aad, tpr_aad, _ = roc_curve(y_true_binary, aad_y_scores_inv)
+    auc_aad = auc(fpr_aad, tpr_aad)
+
+    fpr_base, tpr_base, _ = roc_curve(y_true_binary, base_y_scores_inv)
+    auc_base = auc(fpr_base, tpr_base)
+
+    print(f"(AUC) for AADForest: {auc_aad:.4f}")
+    print(f"(AUC) for base forest: {auc_base:.4f}")
+
+    plt.figure(figsize=(10, 8))
+
+    plt.plot(fpr_aad, tpr_aad, color='darkorange', lw=2,
+             label=f'AADForest (AUC = {auc_aad:.3f})')
+
+    plt.plot(fpr_base, tpr_base, color='cornflowerblue', lw=2,
+             label=f'Base Forest (AUC = {auc_base:.3f})')
+
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Chance')
+
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate', fontsize=12)
+    plt.ylabel('True Positive Rate', fontsize=12)
+    plt.title('AADForest vs. Base Forest', fontsize=14)
+    plt.legend(loc="lower right", fontsize=11)
+    plt.grid(True)
+    plt.show()
+
+    results = {
+        'aad': {'auc': auc_aad, 'fpr': fpr_aad, 'tpr': tpr_aad},
+        'base': {'auc': auc_base, 'fpr': fpr_base, 'tpr': tpr_base}
+    }
+    return results
 
 
 def evaluate_aadforest_params(
@@ -46,10 +411,10 @@ def evaluate_aadforest_params(
     anomaly_indices = np.where(known_labels == Label.A)[0]
 
     if len(anomaly_indices) == 0:
-        raise ValueError("В `known_labels` не найдено ни одной аномалии (Label.A). Валидация невозможна.")
+        raise ValueError()
 
     ranks = []
-    print(f"Начинаю валидацию для {len(anomaly_indices)} аномалий с параметрами: {params}")
+    print(f"Start validation for {len(anomaly_indices)} anomalies with: {params}")
 
     for i, hold_out_idx in enumerate(anomaly_indices):
         print(f"  -> Обработка аномалии {i + 1}/{len(anomaly_indices)}...")
@@ -78,10 +443,10 @@ def evaluate_aadforest_params(
         )
         rank = np.sum(base_scores >= hold_out_score) + 1
         ranks.append(rank)
-        print(f'Для неё получен ранк {len(base_scores)-rank}')
+        print(f'Rank {len(base_scores)-rank}')
 
     average_rank = np.median(ranks)
-    print(f"Готово. Медианный ранг для данных параметров: {len(base_scores)-average_rank:.2f}\n")
+    print(f"Median rank: {len(base_scores)-average_rank:.2f}\n")
 
     return len(base_scores)-average_rank
 
@@ -257,14 +622,6 @@ def process_matrices(matrix1, matrix2):
 
 
 def compare_distributions(arr1, arr2, name1='Array 1', name2='Array 2', save_dir='distribution_plots'):
-    """
-    Plots and saves comparison of two numerical distributions.
-
-    Parameters:
-    - arr1, arr2: arrays of numbers (list or np.ndarray)
-    - name1, name2: labels for the arrays
-    - save_dir: directory to save output images
-    """
     os.makedirs(save_dir, exist_ok=True)
     sns.set(style="whitegrid")
 
@@ -335,6 +692,96 @@ def find_or_download_file(filename, save_dir='.'):
         return None
 
 
+def plot_dirty_leaf_fraction_vs_depth(
+        base_params: Dict[str, Any],
+        base_data: Dict[str, np.ndarray],
+        known_features: Dict[str, np.ndarray],
+        known_labels: np.ndarray,
+        depth_range = None
+):
+    """
+    Plots the fraction of "dirty" leaves as a function of the `max_depth` parameter,
+    using the raw, unscaled data.
+
+    Args:
+        base_params (Dict[str, Any]): Base parameters for AADForest. `max_depth` will be
+                                      overwritten by the loop.
+        base_data (Dict[str, np.ndarray]): The unannotated background data.
+        known_features (Dict[str, np.ndarray]): The annotated feature data.
+        known_labels (np.ndarray): The labels for the annotated data.
+        depth_range (List[int], optional): The range of max_depth values to test.
+                                           Defaults to a predefined range.
+    """
+    if depth_range is None:
+        depth_range = list(range(12, 33, 4)) + list(range(40, 101, 10))
+
+    print("Analyzing dirty leaf fraction vs. max_depth (without scaling)...")
+    print(f"Testing depths: {depth_range}")
+
+    # 1. Prepare data by concatenating feature sets (NO SCALING)
+    print("  - Preparing data...")
+    sorted_keys = sorted(known_features.keys())
+    known_features_cat = np.hstack([known_features[key] for key in sorted_keys])
+    base_data_cat = np.hstack([base_data.get(key, np.zeros((len(known_features_cat), 0))) for key in sorted_keys])
+
+    dirty_fractions = []
+
+    # 2. Loop over the specified depth range
+    for i, depth in enumerate(depth_range):
+        print(f"\n  -> Testing depth {depth} ({i + 1}/{len(depth_range)})...")
+
+        current_params = base_params.copy()
+        current_params['max_depth'] = depth
+
+        # 3. Train the model on the original, unscaled data
+        forest = AADForest(**current_params).fit_known(base_data_cat, known_features_cat, known_labels)
+
+        # 4. Analyze the leaves
+        leaf_indices = forest.apply(known_features_cat)
+        leaf_stats = defaultdict(lambda: {"anomalies": 0, "normals": 0})
+
+        n_samples, n_estimators = leaf_indices.shape
+        for i_sample in range(n_samples):
+            label = known_labels[i_sample]
+            for i_tree in range(n_estimators):
+                key = (i_tree, leaf_indices[i_sample, i_tree])
+                if label == Label.A:
+                    leaf_stats[key]['anomalies'] += 1
+                else:
+                    leaf_stats[key]['normals'] += 1
+
+        # 5. Calculate the fraction
+        total_populated_leaves = len(leaf_stats)
+        if total_populated_leaves == 0:
+            print("     -> No populated leaves found. Skipping this depth.")
+            dirty_fractions.append(np.nan)
+            continue
+
+        dirty_leaves_count = sum(
+            1 for stats in leaf_stats.values()
+            if stats['anomalies'] > 0 and stats['normals'] > 0
+        )
+
+        fraction = dirty_leaves_count / total_populated_leaves
+        dirty_fractions.append(fraction)
+        print(f"     -> Total populated leaves: {total_populated_leaves}")
+        print(f"     -> Dirty leaves: {dirty_leaves_count}")
+        print(f"     -> Dirty Leaf Fraction: {fraction:.4f}")
+
+    # 6. Plot the results
+    plt.figure(figsize=(12, 7))
+    plt.plot(depth_range, dirty_fractions, marker='o', linestyle='-', color='crimson')
+
+    plt.title('Fraction of "Dirty" Leaves vs. Tree max_depth', fontsize=16)
+    plt.xlabel('max_depth Parameter', fontsize=12)
+    plt.ylabel('Fraction of Dirty Leaves', fontsize=12)
+    plt.xticks(depth_range, rotation=45)
+    plt.grid(True, which="both", ls="--", alpha=0.6)
+    plt.ylim(bottom=0)
+    plt.tight_layout()
+    plt.show()
+
+
 def fink_ad_model_train():
     """
     :return: None
@@ -353,6 +800,7 @@ def fink_ad_model_train():
     parser.add_argument('--plot_sample', type=bool, default=False, help='Plot avg_rank(sample_factor)')
     parser.add_argument('--plot_c_a', type=bool, default=False, help='Plot avg_rank(C_a)')
     parser.add_argument('--plot_tau', type=bool, default=False, help='Plot avg_rank(tau)')
+    parser.add_argument('--plot_leaf_top_pur', type=bool, default=False, help='Plot ...')
     parser.add_argument('--C_a_range', type=float, nargs=2, default=(1, 100),
                         help='C_a range for plot')
     parser.add_argument('--tau_range', type=float, nargs=2, default=(0.1, 1),
@@ -361,6 +809,7 @@ def fink_ad_model_train():
                         help='Sample factor range for plot')
     parser.add_argument('--chunk_limit', type=int, default=25,
                         help='The maximum number of objects that can be requested from Fink at a time')
+    parser.add_argument('--model_test', action='store_true', help='Launch the graphical user interface for model test.')
 
     args = parser.parse_args()
     train_data_path = args.dataset_dir
@@ -390,35 +839,28 @@ def fink_ad_model_train():
         features_2 = x_buf_data["lc_features_g"].apply(lambda data:
             extract_all(data)).add_suffix("_g")
 
-    x_buf_data = x_buf_data.rename(columns={'finkclass':'class'}, errors='ignore')
     print('Filtering...')
     data = pd.concat([
-    x_buf_data[['objectId', 'candid', 'class']],
-    features_1,
-    features_2,
+        features_1,
+        features_2,
     ], axis=1).dropna(axis=0)
     datasets = defaultdict(lambda: defaultdict(list))
     with tqdm(total=len(data)) as pbar:
         for _, row in data.iterrows():
             for passband in filter_base:
                 new_data = datasets[passband]
-                new_data['object_id'].append(row.objectId)
-                new_data['class'].append(row['class'])
                 for col, r_data in zip(data.columns, row):
                     if not col.endswith(passband):
                         continue
                     new_data[col[:-2]].append(r_data)
             pbar.update()
-    DEFAULT_PARAMS = {'n_trees': 150, 'n_subsamples': int(0.5*len(data)), 'C_a': 1000, 'tau': 1-10/len(data),
-                      'n_jobs': None, 'random_seed': 42}
+    DEFAULT_PARAMS = {'n_trees': 150, 'n_subsamples': int(0.5*len(data)), 'C_a': 1000, 'budget': 100,
+                      'n_jobs': None, 'random_seed': 42, 'max_depth': 28}
     main_data = {}
     for passband in datasets:
         new_data = datasets[passband]
         new_df = pd.DataFrame(data=new_data)
         for col in new_df.columns:
-            if col in ('object_id', 'class'):
-                new_df[col] = new_df[col].astype(str)
-                continue
             new_df[col] = new_df[col].astype('float64')
         main_data[passband] = new_df
     data = {key : main_data[key] for key in filter_base}
@@ -431,12 +873,14 @@ def fink_ad_model_train():
         'linear_trend',
         'standard_deviation',
         'weighted_mean',
-        'mean'
+        'mean',
+        # 'object_id',
+        # 'class'
     ]
-    data = {key : item.drop(labels=['object_id', 'class'] + common_rems,
+    data = {key : item.drop(labels=common_rems,
                 axis=1) for key, item in data.items()}
     first_key = next(iter(data))
-    print(f'Используемые фичи: {data[first_key].columns}')
+    # print(f'Используемые фичи: {data[first_key].columns}')
     for key, item in data.items():
         item.mean().to_csv(f'{key}_means.csv')
     data = {
@@ -454,16 +898,20 @@ def fink_ad_model_train():
         if reactions_datasets is None:
             reactions_datasets = {key : pd.read_csv(f'reactions{key}.csv') for key in filter_base}
         reactions_shapes = [dataset.shape for dataset in reactions_datasets.values()]
-        print(f'Размер полученного датасета: {reactions_shapes}')
         if not all(reactions_dataset.shape[0] == 0 for reactions_dataset in reactions_datasets.values()):
             if filter_counter == 0:
                 first_key = next(iter(reactions_datasets))
                 reactions = reactions_datasets[first_key]['class'].values
+                print(f'A: {np.sum(reactions==Label.A)}; R: {np.sum(reactions==Label.R)}')
                 reactions_datasets = {
                     key: process_matrices(data[key], dataset.drop(['class'] + common_rems, axis=1).values).copy(order='C') for key, dataset in reactions_datasets.items()
                 }
+                # reactions_datasets, reactions = clean_dict_from_nans_inplace({key: dataset.drop(['class'] + common_rems, axis=1).values.copy(order='C') for key, dataset in reactions_datasets.items()}, reactions)
         else:
             reactions = np.array([])
+        if args.model_test:
+            gui_model_validation.launch_gui_analyzer(base_dataset=data, reactions_datasets=reactions_datasets, reactions=reactions.copy(order='C'))
+            return
         print(f'Filter {key}, {len(reactions)} reactions')
         if args.plot_sample and filter_counter == 0:
             left, right = args.sample_range
@@ -539,7 +987,46 @@ def fink_ad_model_train():
             plt.grid(True)
             plt.savefig('plot_tau.png')
             plt.close()
-
+        if not filter_counter and args.plot_leaf_top_pur:
+            # evaluate_aadforest_params(
+            #     params=DEFAULT_PARAMS,
+            #     base_data=data,
+            #     known_features=reactions_datasets,
+            #     known_labels=reactions.copy(order='C')
+            # )
+            # plot_dirty_leaf_fraction_vs_depth(
+            #     base_params=DEFAULT_PARAMS,
+            #     base_data=data,
+            #     known_features=reactions_datasets,
+            #     known_labels=reactions.copy(order='C')
+            # )
+            # plot_leaf_purity_ratio_histogram(
+            #     params=DEFAULT_PARAMS,
+            #     base_data=data,
+            #     known_features=reactions_datasets,
+            #     known_labels=reactions.copy(order='C')
+            # )
+            plot_leaf_purity(
+                params=DEFAULT_PARAMS,
+                base_data=data,
+                known_features=reactions_datasets,
+                known_labels=reactions.copy(order='C'),
+            )
+            # anomaly_percentile = 100 * DEFAULT_PARAMS['budget'] / 57678
+            # plot_train_test_score_distributions(
+            #     params=DEFAULT_PARAMS,
+            #     base_data=data,
+            #     known_features=reactions_datasets,
+            #     known_labels=reactions.copy(order='C'),
+            #     anomaly_percentile=anomaly_percentile,
+            #     bins=100
+            # )
+            # comparison_results = compare_roc_auc_aad_vs_base(
+            #     params=DEFAULT_PARAMS,
+            #     base_data=data,
+            #     known_features=reactions_datasets,
+            #     known_labels=reactions.copy(order='C')
+            # )
         forest_simp = AADForest(
             **DEFAULT_PARAMS
         ).fit_known(

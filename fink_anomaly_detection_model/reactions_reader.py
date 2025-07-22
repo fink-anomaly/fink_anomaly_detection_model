@@ -332,7 +332,7 @@ def get_fink_data(oids, chunk_limit=25):
     for chunk in chunks(filtered_oids, chunk_limit):
         payload = {
             'objectId': ','.join(chunk),
-            'columns': 'd:lc_features_g,d:lc_features_r,i:objectId',
+            'columns': 'd:lc_features_g,d:lc_features_r,i:objectId,d:anomaly_score',
             'output-format': 'json'
         }
 
@@ -395,8 +395,11 @@ def select_best_row_per_object(df):
             if not has_valid:
                 continue
 
-            nan_count = count_nans(g_feats) + count_nans(r_feats)
-            valid_rows.append((nan_count, row))
+            # nan_count = count_nans(g_feats) + count_nans(r_feats)
+            anomaly_score = row[('d:anomaly_score')]
+            # print(anomaly_score)
+            nan_count = anomaly_score if anomaly_score != 'NaN' else 0
+            valid_rows.append((nan_count, row.drop(('d:anomaly_score'))))
 
         if valid_rows:
             best_row = min(valid_rows, key=lambda x: x[0])[1]
@@ -521,7 +524,7 @@ def load_reactions(name: str, chunk_limit=25):
         if user_data['model_name'] == name:
             positive = user_data["positive"]
             negative = user_data["negative"]
-            print(f'Получено {len(negative) + len(positive)} реакций')
+            print(f'{len(negative) + len(positive)} reactions')
             if len(negative) + len(positive) == 0:
                 return {key: pd.DataFrame() for key in FILTER_BASE}
             else:
