@@ -692,6 +692,90 @@ def find_or_download_file(filename, save_dir='.'):
         return None
 
 
+def calculate_and_report_permutation_importance(
+        params: Dict[str, Any],
+        base_data: np.ndarray,
+        known_features: np.ndarray,
+        known_labels: np.ndarray,
+        feature_names: list,
+        filter_key: str,
+        output_dir: str = '.',
+        test_size: float = 0.3,
+        random_state: int = 42,
+        top_n: int = 25
+):
+    print(f"\n[INFO] Расчет Permutation Importance для фильтра '{filter_key}'...")
+
+    if len(np.unique(known_labels)) < 2:
+        print("[ERROR] Для расчета Permutation Importance необходимо как минимум два класса в `known_labels`.")
+        return
+    indices = np.arange(known_features.shape[0])
+    train_indices, test_indices = train_test_split(
+        indices,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=known_labels
+    )
+
+    X_train_known, X_test_known = known_features[train_indices], known_features[test_indices]
+    y_train, y_test = known_labels[train_indices], known_labels[test_indices]
+
+    y_test_binary = (y_test == Label.A).astype(int)
+    print("  - Обучение модели...")
+    forest = AADForest(**params).fit_known(
+        base_data,
+        known_data=X_train_known,
+        known_labels=y_train
+    )
+
+    y_pred_scores = -forest.score_samples(X_test_known)
+    baseline_score = roc_auc_score(y_test_binary, y_pred_scores)
+    print(f"  - Базовый ROC AUC на тестовой выборке: {baseline_score:.4f}")
+    importances = []
+    n_features = X_test_known.shape[1]
+
+    for i in tqdm(range(n_features), desc="  - Перестановка признаков"):
+        X_test_permuted = X_test_known.copy()
+        np.random.shuffle(X_test_permuted[:, i])
+        y_pred_permuted = -forest.score_samples(X_test_permuted)
+        permuted_score = roc_auc_score(y_test_binary, y_pred_permuted)
+        importance = baseline_score - permuted_score
+        importances.append(importance)
+    importance_df = pd.DataFrame({
+        'feature': feature_names,
+        'importance': importances
+    }).sort_values(by='importance', ascending=False, key=abs).reset_index(drop=True)
+
+    output_filename = os.path.join(output_dir, f'permutation_importance_{filter_key}.csv')
+    try:
+        importance_df.to_csv(output_filename, index=False)
+        print(f"[SUCCESS] Важность признаков сохранена в файл: {output_filename}")
+    except Exception as e:
+        print(f"[ERROR] Не удалось сохранить файл: {e}")
+
+    print(f"\nТоп-5 самых важных признаков для '{filter_key}':")
+    print(importance_df.head(5))
+
+    # 6. Строим график
+    plt.figure(figsize=(12, max(8, len(importance_df[:top_n]) * 0.35)))
+    sns.barplot(
+        x='importance',
+        y='feature',
+        data=importance_df.head(top_n),
+        palette='plasma'
+    )
+    plt.title(f'Permutation Importance (Топ-{top_n}) для фильтра {filter_key}', fontsize=16)
+    plt.xlabel('Падение ROC AUC после перестановки (Importance)', fontsize=12)
+    plt.ylabel('Признак', fontsize=12)
+    plt.grid(axis='x', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+
+    plot_filename = os.path.join(output_dir, f'permutation_importance_plot_{filter_key}.png')
+    plt.savefig(plot_filename)
+    print(f"[SUCCESS] График важности признаков сохранен: {plot_filename}")
+    plt.show()
+
+
 def plot_dirty_leaf_fraction_vs_depth(
         base_params: Dict[str, Any],
         base_data: Dict[str, np.ndarray],
@@ -793,7 +877,8 @@ def fink_ad_model_train():
 
     """
     parser = argparse.ArgumentParser(description='Fink AD model training')
-    parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset', default='lc_features_20210617_photometry_corrected.parquet')
+    parser.add_argument('--dataset_dir', type=str, help='Input dir for dataset',
+                        default='lc_features_20210617_photometry_corrected.parquet')
     parser.add_argument('--load_user', type=str, default='', help='Load user from anomaly base')
     parser.add_argument('--diff', type=bool, default=False, help='Diff with base model')
     parser.add_argument('--proba_arg', type=str, default='', help='Experiment ID')
@@ -810,8 +895,14 @@ def fink_ad_model_train():
     parser.add_argument('--chunk_limit', type=int, default=25,
                         help='The maximum number of objects that can be requested from Fink at a time')
     parser.add_argument('--model_test', action='store_true', help='Launch the graphical user interface for model test.')
+    parser.add_argument('--feature_importance', action='store_true',
+                        help='Рассчитать и отобразить важность признаков для обученных моделей.')
+    parser.add_argument('--output_dir', type=str, default='.',
+                        help='Директория для сохранения выходных файлов (модели, важность признаков и т.д.).')
 
     args = parser.parse_args()
+    os.makedirs(args.output_dir, exist_ok=True)
+
     train_data_path = args.dataset_dir
     reactions_datasets = None
     name = None
@@ -830,14 +921,14 @@ def fink_ad_model_train():
 
     if "lc_features_r" not in x_buf_data.columns:
         features_1 = x_buf_data["lc_features"].apply(lambda data:
-            extract_one(data, "1")).add_suffix("_r")
+                                                     extract_one(data, "1")).add_suffix("_r")
         features_2 = x_buf_data["lc_features"].apply(lambda data:
-            extract_one(data, "2")).add_suffix("_g")
+                                                     extract_one(data, "2")).add_suffix("_g")
     else:
         features_1 = x_buf_data["lc_features_r"].apply(lambda data:
-            extract_all(data)).add_suffix("_r")
+                                                       extract_all(data)).add_suffix("_r")
         features_2 = x_buf_data["lc_features_g"].apply(lambda data:
-            extract_all(data)).add_suffix("_g")
+                                                       extract_all(data)).add_suffix("_g")
 
     print('Filtering...')
     data = pd.concat([
@@ -854,8 +945,8 @@ def fink_ad_model_train():
                         continue
                     new_data[col[:-2]].append(r_data)
             pbar.update()
-    DEFAULT_PARAMS = {'n_trees': 150, 'n_subsamples': int(0.5*len(data)), 'C_a': 1000, 'budget': 100,
-                      'n_jobs': None, 'random_seed': 42, 'max_depth': 28}
+    DEFAULT_PARAMS = {'n_trees': 150, 'n_subsamples': int(0.5 * len(data)), 'C_a': 1000, 'budget': 100,
+                      'n_jobs': None, 'random_seed': 42, 'max_depth': 12}
     main_data = {}
     for passband in datasets:
         new_data = datasets[passband]
@@ -863,29 +954,34 @@ def fink_ad_model_train():
         for col in new_df.columns:
             new_df[col] = new_df[col].astype('float64')
         main_data[passband] = new_df
-    data = {key : main_data[key] for key in filter_base}
+    data = {key: main_data[key] for key in filter_base}
     assert data['_r'].shape[1] == data['_g'].shape[1], '''Mismatch of the dimensions of r/g!'''
     common_rems = [
-        'percent_amplitude',
-        'linear_fit_reduced_chi2',
-        'inter_percentile_range_10',
+        # 'percent_amplitude',
+        # 'linear_fit_reduced_chi2',
+        # 'inter_percentile_range_10',
         'mean_variance',
-        'linear_trend',
-        'standard_deviation',
-        'weighted_mean',
-        'mean',
+        # 'linear_trend',
+        # 'standard_deviation',
+        # 'weighted_mean',
+        # 'mean',
         # 'object_id',
         # 'class'
     ]
-    data = {key : item.drop(labels=common_rems,
-                axis=1) for key, item in data.items()}
+    data = {key: item.drop(labels=common_rems,
+                           axis=1) for key, item in data.items()}
+
     first_key = next(iter(data))
-    # print(f'Используемые фичи: {data[first_key].columns}')
+    feature_names = {key: item.columns.tolist() for key, item in data.items()}
+    print(f'Используемые фичи ({len(feature_names[first_key])} шт.): {feature_names[first_key]}')
+
     for key, item in data.items():
-        item.mean().to_csv(f'{key}_means.csv')
+        item.mean().to_csv(os.path.join(args.output_dir, f'{key}_means.csv'))
+
     data = {
-        key : value.values.copy(order='C') for key, value in data.items()
+        key: value.values.copy(order='C') for key, value in data.items()
     }
+
     print('Training...')
     result_models_IO = []
     target_result = None
@@ -896,21 +992,22 @@ def fink_ad_model_train():
     for key in filter_base:
         initial_type = [('X', FloatTensorType([None, data[key].shape[1]]))]
         if reactions_datasets is None:
-            reactions_datasets = {key : pd.read_csv(f'reactions{key}.csv') for key in filter_base}
+            reactions_datasets = {key: pd.read_csv(f'reactions{key}.csv') for key in filter_base}
         reactions_shapes = [dataset.shape for dataset in reactions_datasets.values()]
         if not all(reactions_dataset.shape[0] == 0 for reactions_dataset in reactions_datasets.values()):
             if filter_counter == 0:
                 first_key = next(iter(reactions_datasets))
                 reactions = reactions_datasets[first_key]['class'].values
-                print(f'A: {np.sum(reactions==Label.A)}; R: {np.sum(reactions==Label.R)}')
-                reactions_datasets = {
-                    key: process_matrices(data[key], dataset.drop(['class'] + common_rems, axis=1).values).copy(order='C') for key, dataset in reactions_datasets.items()
-                }
-                # reactions_datasets, reactions = clean_dict_from_nans_inplace({key: dataset.drop(['class'] + common_rems, axis=1).values.copy(order='C') for key, dataset in reactions_datasets.items()}, reactions)
+                print(f'A: {np.sum(reactions == Label.A)}; R: {np.sum(reactions == Label.R)}')
+
+                reactions_datasets, reactions = clean_dict_from_nans_inplace(
+                    {key: dataset.drop(['class'] + common_rems, axis=1).values.copy(order='C') for key, dataset in
+                     reactions_datasets.items()}, reactions)
         else:
             reactions = np.array([])
         if args.model_test:
-            gui_model_validation.launch_gui_analyzer(base_dataset=data, reactions_datasets=reactions_datasets, reactions=reactions.copy(order='C'))
+            gui_model_validation.launch_gui_analyzer(base_dataset=data, reactions_datasets=reactions_datasets,
+                                                     reactions=reactions.copy(order='C'))
             return
         print(f'Filter {key}, {len(reactions)} reactions')
         if args.plot_sample and filter_counter == 0:
@@ -919,16 +1016,22 @@ def fink_ad_model_train():
             result = []
             for sample_factor in sample_factors:
                 anomaly_indices = np.where(reactions == Label.A)[0]
-                an_features, an_reactions = {key: dataset[anomaly_indices] for key, dataset in reactions_datasets.items()}, reactions[anomaly_indices]
-                nonan_features, nonan_reactions = {key: dataset[np.where(reactions != Label.A)[0]] for key, dataset in reactions_datasets.items()}, reactions[reactions != Label.A]
+                an_features, an_reactions = {key: dataset[anomaly_indices] for key, dataset in
+                                             reactions_datasets.items()}, reactions[anomaly_indices]
+                nonan_features, nonan_reactions = {key: dataset[np.where(reactions != Label.A)[0]] for key, dataset in
+                                                   reactions_datasets.items()}, reactions[reactions != Label.A]
                 nonan_count = sample_factor * len(an_reactions)
                 print(nonan_count)
                 if sample_factor > 0:
-                    all_features, all_reactions = {key: np.vstack((an_features[key], nonan_features[key][:nonan_count])).copy(order='C') for key in data.keys()}, np.hstack((an_reactions, nonan_reactions[:nonan_count]))
+                    all_features, all_reactions = {
+                        key: np.vstack((an_features[key], nonan_features[key][:nonan_count])).copy(order='C') for key in
+                        data.keys()}, np.hstack((an_reactions, nonan_reactions[:nonan_count]))
                 elif sample_factor == 0:
                     all_features, all_reactions = an_features, an_reactions
                 else:
-                    all_features, all_reactions = {key: np.vstack((an_features[key], nonan_features[key][:nonan_count])).copy(order='C') for key in data.keys()}, np.hstack((an_reactions, nonan_reactions[:nonan_count]))
+                    all_features, all_reactions = {
+                        key: np.vstack((an_features[key], nonan_features[key][:nonan_count])).copy(order='C') for key in
+                        data.keys()}, np.hstack((an_reactions, nonan_reactions[:nonan_count]))
                 params = DEFAULT_PARAMS
                 result.append(
                     evaluate_aadforest_params(
@@ -936,14 +1039,14 @@ def fink_ad_model_train():
                         base_data=data,
                         known_features=all_features,
                         known_labels=all_reactions.copy(order='C'),
-                        base_forest=sample_factor==-1
+                        base_forest=sample_factor == -1
                     )
                 )
             plt.plot(sample_factors, result, marker='o')
             plt.xlabel("Sample factor")
             plt.ylabel("Median anomaly rank")
             plt.grid(True)
-            plt.savefig('plot_sample.png')
+            plt.savefig(os.path.join(args.output_dir, 'plot_sample.png'))
             plt.close()
         if args.plot_c_a and filter_counter == 0:
             left, right = args.C_a_range
@@ -964,7 +1067,7 @@ def fink_ad_model_train():
             plt.xlabel("C_a factor")
             plt.ylabel("Median anomaly rank")
             plt.grid(True)
-            plt.savefig('plot_c_a.png')
+            plt.savefig(os.path.join(args.output_dir, 'plot_c_a.png'))
             plt.close()
         if args.plot_tau and filter_counter == 0:
             left, right = args.tau_range
@@ -985,48 +1088,16 @@ def fink_ad_model_train():
             plt.xlabel("Tau factor")
             plt.ylabel("Median anomaly rank")
             plt.grid(True)
-            plt.savefig('plot_tau.png')
+            plt.savefig(os.path.join(args.output_dir, 'plot_tau.png'))
             plt.close()
         if not filter_counter and args.plot_leaf_top_pur:
-            # evaluate_aadforest_params(
-            #     params=DEFAULT_PARAMS,
-            #     base_data=data,
-            #     known_features=reactions_datasets,
-            #     known_labels=reactions.copy(order='C')
-            # )
-            # plot_dirty_leaf_fraction_vs_depth(
-            #     base_params=DEFAULT_PARAMS,
-            #     base_data=data,
-            #     known_features=reactions_datasets,
-            #     known_labels=reactions.copy(order='C')
-            # )
-            # plot_leaf_purity_ratio_histogram(
-            #     params=DEFAULT_PARAMS,
-            #     base_data=data,
-            #     known_features=reactions_datasets,
-            #     known_labels=reactions.copy(order='C')
-            # )
             plot_leaf_purity(
                 params=DEFAULT_PARAMS,
                 base_data=data,
                 known_features=reactions_datasets,
                 known_labels=reactions.copy(order='C'),
             )
-            # anomaly_percentile = 100 * DEFAULT_PARAMS['budget'] / 57678
-            # plot_train_test_score_distributions(
-            #     params=DEFAULT_PARAMS,
-            #     base_data=data,
-            #     known_features=reactions_datasets,
-            #     known_labels=reactions.copy(order='C'),
-            #     anomaly_percentile=anomaly_percentile,
-            #     bins=100
-            # )
-            # comparison_results = compare_roc_auc_aad_vs_base(
-            #     params=DEFAULT_PARAMS,
-            #     base_data=data,
-            #     known_features=reactions_datasets,
-            #     known_labels=reactions.copy(order='C')
-            # )
+
         forest_simp = AADForest(
             **DEFAULT_PARAMS
         ).fit_known(
@@ -1034,30 +1105,46 @@ def fink_ad_model_train():
             known_data=reactions_datasets[key],
             known_labels=reactions.copy(order='C')
         )
+        if args.feature_importance:
+            if reactions.size > 0 and len(np.unique(reactions)) > 1:
+                calculate_and_report_permutation_importance(
+                    params=DEFAULT_PARAMS,
+                    base_data=data[key],
+                    known_features=reactions_datasets[key],
+                    known_labels=reactions.copy(order='C'),
+                    feature_names=feature_names[key],
+                    filter_key=key,
+                    output_dir=args.output_dir
+                )
+            else:
+                print(f"[WARNING] Пропуск расчета важности признаков для фильтра '{key}': недостаточно размеченных данных.")
+
         if args.diff:
             base_forest = AADForest(
                 **DEFAULT_PARAMS
             ).fit(data[key])
             learned_model_score = forest_simp.score_samples(data[key])
             base_model_score = base_forest.score_samples(data[key])
-            compare_distributions(learned_model_score, base_model_score, name1=f'Model with {reactions_datasets[key].shape[0]} reactions', name2='Base model')
+            compare_distributions(learned_model_score, base_model_score,
+                                  name1=f'Model with {reactions_datasets[key].shape[0]} reactions', name2='Base model',
+                                  save_dir=args.output_dir)
         if args.proba_arg:
             pdf = reactions_reader.get_fink_data(
-                    [
-                        args.proba_arg
-                    ]
-                )
+                [
+                    args.proba_arg
+                ]
+            )
             pdf = reactions_reader.select_best_row_per_object(pdf)
             for col in ['d:lc_features_g', 'd:lc_features_r']:
                 pdf[col] = pdf[col].apply(lambda x: json.loads(x))
-            feature_names = FEATURES_COLS
+            feature_names_fink = FEATURES_COLS
             pdf = pdf.loc[(pdf['d:lc_features_g'].astype(str) != '[]') & (pdf['d:lc_features_r'].astype(str) != '[]')]
             feature_columns = ['d:lc_features_g', 'd:lc_features_r']
             print(pdf.shape)
             common_rems = []
             result = dict()
             for section in feature_columns:
-                pdf[feature_names] = pdf[section].to_list()
+                pdf[feature_names_fink] = pdf[section].to_list()
                 pdf_gf = pdf.drop(feature_columns, axis=1).rename(columns={'i:objectId': 'object_id'})
                 pdf_gf = pdf_gf.reindex(sorted(pdf_gf.columns), axis=1)
                 pdf_gf.drop(common_rems, axis=1, inplace=True)
@@ -1082,19 +1169,23 @@ def fink_ad_model_train():
         onx = to_onnx_add(forest_simp, initial_types=initial_type)
         result_models_IO.append(onx.SerializeToString())
         filter_counter += 1
+
     if args.proba_arg:
         sorted_data = np.sort(target_result[0])
         index = np.searchsorted(sorted_data, target_result[1]) + 1
         print(f'Model {name}, position for {args.proba_arg} is {index} from {len(sorted_data)} (model with reactions)')
         sorted_data = np.sort(base_result[0])
         index = np.searchsorted(sorted_data, base_result[1]) + 1
-        print(f'Model {name}, position for {args.proba_arg} is {index} from {len(sorted_data)} (model without reactions)')
+        print(
+            f'Model {name}, position for {args.proba_arg} is {index} from {len(sorted_data)} (model without reactions)')
+
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.writestr(f'forest{FILTER_BASE[0]}_AAD{name}.onnx', result_models_IO[0])
         zip_file.writestr(f'forest{FILTER_BASE[1]}_AAD{name}.onnx', result_models_IO[1])
     zip_buffer.seek(0)
-    with open(f'anomaly_detection_forest_AAD{name}.zip', 'wb') as f:
+    zip_filename = os.path.join(args.output_dir, f'anomaly_detection_forest_AAD{name}.zip')
+    with open(zip_filename, 'wb') as f:
         f.write(zip_buffer.getvalue())
 
 
